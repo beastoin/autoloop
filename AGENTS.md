@@ -4,12 +4,12 @@ Operating guide for AI agents (`geni`, `jin`, and future agents) working in `bea
 
 ## Purpose
 
-This repo contains two tracks:
+This repo is the **source of truth** for building agent-grade CLIs via autonomous loops.
 
-- autoloop system under `autoresearch/` — autonomous loop for building agent-grade CLIs
-- mobile device control reference under `src/` — design patterns (not active development)
+- `autoresearch/` — phase programs, evaluators, and build targets
+- Product repos (e.g. `beastoin/agent-flutter`) are **publish targets only** — do not edit them directly
 
-If your task is about autonomous CLI building, work in `autoresearch/**`.
+All code changes go through autoloop: write phase program → implement → eval → keep/revert → copy to product repo → publish.
 
 ## Roles and delegation model
 
