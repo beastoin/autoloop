@@ -55,6 +55,12 @@ Execution rule:
 
 Do not treat evaluator files as mutable implementation space unless explicitly asked to define a new phase.
 
+## Publish rule
+
+autoloop is the source of truth. Do not edit product repos (`beastoin/agent-flutter`) directly.
+After a phase completes: copy build target → product repo → npm publish.
+Every code change must go through a phase program + eval gate.
+
 ## `agent-flutter` architecture (key modules)
 
 - `src/cli.ts`

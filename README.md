@@ -90,6 +90,16 @@ bash autoresearch/standalone/eval.sh
 bash autoresearch/e2e-eval.sh
 ```
 
+## Publish flow
+
+autoloop is the **source of truth**. Product repos are publish targets only.
+
+1. Write `program-phaseX.md` with objectives in autoloop
+2. Agent builds/iterates code in `autoresearch/standalone/agent-flutter/`
+3. Eval passes → copy to [beastoin/agent-flutter](https://github.com/beastoin/agent-flutter) → npm publish
+
+**Do not edit product repos directly.** Every change goes through a phase program + eval gate first.
+
 ## Building a new agent CLI with autoloop
 
 1. Define the objective and acceptance criteria in `program.md`
@@ -97,6 +107,7 @@ bash autoresearch/e2e-eval.sh
 3. Write immutable `e2e-test.ts` for real runtime validation
 4. Run autonomous keep/revert loop until all gates pass
 5. Each new phase: add `program-phaseX.md`, extend eval sentinel, run loop
+6. On phase complete: copy build target to its product repo and publish
 
 Reference implementation: `autoresearch/standalone/agent-flutter/`
 
