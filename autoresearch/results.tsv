@@ -1,0 +1,13 @@
+commit	phase	build	tests	status	description
+ec94f00	1	pass	pass	keep	VmServiceClient + index + 17 tests
+4fea202	1	pass	pass	PHASE_COMPLETE	Flutter handler + SessionState fields
+2da964b	2	pass	pass	PHASE_COMPLETE	Element converter + SnapshotNode source field + merge logic + 17 tests
+3ffbe0b	3	pass	pass	PHASE_COMPLETE	Matcher builder + isFlutterNode + 12 tests
+33697f8	3	pass	pass	keep	Flutter handler tests (11 tests) + SessionStore fix
+7b3dcd2	3	pass	pass	keep	URI normalization tests (6 tests)
+683439f	3	pass	pass	keep	Element converter edge cases (4 tests)
+14f0920	3	pass	pass	keep	VM client edge cases: disconnect, missing fields, multi-isolate (5 tests)
+7fc946a	3	pass	pass	keep	Integration flow tests (7 tests) - full pipeline end-to-end
+aad4944	3	pass	pass	keep	Add key/widget-type/source to selector system
+c70eb3a	3	pass	pass	keep	Selector tests for Flutter keys (4 tests)
+66494e4	e2e	pass	pass	keep	Wire format fix: flat matchers, string coords, input param — all 11 e2e pass
