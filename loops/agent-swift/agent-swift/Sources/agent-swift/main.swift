@@ -8,7 +8,7 @@ struct AgentSwift: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "agent-swift",
         abstract: "CLI for AI agents to control macOS apps via Accessibility API",
-        version: "0.1.0",
+        version: "0.2.0",
         subcommands: [
             DoctorCommand.self,
             ConnectCommand.self,
@@ -28,6 +28,21 @@ struct AgentSwift: ParsableCommand {
     )
 
 }
+
+// Resolve JSON mode: --json flag > AGENT_SWIFT_JSON env > non-TTY auto-detect
+func resolveJsonMode() {
+    // If --json is already in args, do nothing
+    let args = CommandLine.arguments
+    if args.contains("--json") { return }
+    // Check env var
+    if ProcessInfo.processInfo.environment["AGENT_SWIFT_JSON"] == "1" {
+        setenv("AGENT_SWIFT_JSON", "1", 1)
+    } else if isatty(STDOUT_FILENO) == 0 {
+        // Non-TTY → auto-JSON
+        setenv("AGENT_SWIFT_JSON", "1", 1)
+    }
+}
+resolveJsonMode()
 
 do {
     var command = try AgentSwift.parseAsRoot()
@@ -52,6 +67,11 @@ do {
 struct GlobalOptions: ParsableArguments {
     @Flag(name: .long, help: "Output JSON")
     var json = false
+
+    /// Resolved JSON mode: flag > env var > TTY detection
+    var useJson: Bool {
+        return json || ProcessInfo.processInfo.environment["AGENT_SWIFT_JSON"] == "1"
+    }
 }
 
 // MARK: - Doctor
@@ -98,7 +118,7 @@ struct DoctorCommand: ParsableCommand {
         let allPass = checks.allSatisfy { $0.status == "pass" }
         let result = DoctorResult(checks: checks, allPass: allPass)
 
-        if globals.json {
+        if globals.useJson {
             print(Output.json(result))
         } else {
             for check in checks {
@@ -135,7 +155,7 @@ struct ConnectCommand: ParsableCommand {
     func run() throws {
         guard AXClient.isTrusted() else {
             Output.printError(code: "AX_NOT_TRUSTED", message: "Accessibility permission not granted",
-                            hint: "Grant access in System Settings > Privacy & Security > Accessibility", useJson: globals.json)
+                            hint: "Grant access in System Settings > Privacy & Security > Accessibility", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
@@ -145,7 +165,7 @@ struct ConnectCommand: ParsableCommand {
         if let p = pid {
             guard AXClient.isProcessRunning(pid: p) else {
                 Output.printError(code: "APP_NOT_RUNNING", message: "No running process with PID: \(p)",
-                                hint: "Check with: ps -p \(p)", useJson: globals.json)
+                                hint: "Check with: ps -p \(p)", useJson: globals.useJson)
                 throw ExitCode(2)
             }
             resolvedPid = p
@@ -154,14 +174,14 @@ struct ConnectCommand: ParsableCommand {
         } else if let bid = bundleId {
             guard let p = AXClient.resolvePID(bundleId: bid) else {
                 Output.printError(code: "APP_NOT_FOUND", message: "No running app with bundle ID: \(bid)",
-                                hint: "Launch the app first, or use --pid", useJson: globals.json)
+                                hint: "Launch the app first, or use --pid", useJson: globals.useJson)
                 throw ExitCode(2)
             }
             resolvedPid = p
             resolvedBundleId = bid
         } else {
             Output.printError(code: "INVALID_ARGS", message: "Must specify --pid or --bundle-id",
-                            hint: "Example: agent-swift connect --bundle-id com.apple.TextEdit", useJson: globals.json)
+                            hint: "Example: agent-swift connect --bundle-id com.apple.TextEdit", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
@@ -176,7 +196,7 @@ struct ConnectCommand: ParsableCommand {
 
         let result = ConnectResult(connected: true, pid: resolvedPid, bundleId: resolvedBundleId, connectedAt: now)
 
-        if globals.json {
+        if globals.useJson {
             print(Output.json(result))
         } else {
             print("Connected to PID \(resolvedPid)" + (resolvedBundleId.map { " (\($0))" } ?? ""))
@@ -187,14 +207,14 @@ struct ConnectCommand: ParsableCommand {
 // MARK: - Disconnect
 
 struct DisconnectCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "disconnect", abstract: "Disconnect from app")
+    static let configuration = CommandConfiguration(commandName: "disconnect", abstract: "Disconnect from the connected app")
 
     @OptionGroup var globals: GlobalOptions
 
     func run() throws {
         let store = SessionStore()
         try store.clear()
-        if globals.json {
+        if globals.useJson {
             print(Output.json(["disconnected": true]))
         } else {
             print("Disconnected")
@@ -205,7 +225,7 @@ struct DisconnectCommand: ParsableCommand {
 // MARK: - Status
 
 struct StatusCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "status", abstract: "Show connection state")
+    static let configuration = CommandConfiguration(commandName: "status", abstract: "Show connection status")
 
     @OptionGroup var globals: GlobalOptions
 
@@ -227,7 +247,7 @@ struct StatusCommand: ParsableCommand {
             refs: session.refs.count
         )
 
-        if globals.json {
+        if globals.useJson {
             print(Output.json(result))
         } else {
             if session.isConnected {
@@ -257,13 +277,13 @@ struct SnapshotCommand: ParsableCommand {
 
         guard session.isConnected, let pid = session.pid else {
             Output.printError(code: "NOT_CONNECTED", message: "No active session",
-                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.json)
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
         guard AXClient.isProcessRunning(pid: pid) else {
             Output.printError(code: "APP_NOT_RUNNING", message: "Target app (PID \(pid)) is no longer running",
-                            hint: "Reconnect with: agent-swift connect", useJson: globals.json)
+                            hint: "Reconnect with: agent-swift connect", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
@@ -288,7 +308,7 @@ struct SnapshotCommand: ParsableCommand {
         session.interactiveSnapshot = interactive
         try store.save(session)
 
-        if globals.json {
+        if globals.useJson {
             print(SnapshotFormatter.formatJson(elements: elements))
         } else {
             print(SnapshotFormatter.formatHuman(elements: elements))
@@ -317,20 +337,20 @@ struct PressCommand: ParsableCommand {
 
         guard session.isConnected, let pid = session.pid else {
             Output.printError(code: "NOT_CONNECTED", message: "No active session",
-                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.json)
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
         let refKey = ref.hasPrefix("@") ? String(ref.dropFirst()) : ref
         guard session.refs[refKey] != nil else {
             Output.printError(code: "ELEMENT_NOT_FOUND", message: "Element not found: \(ref)",
-                            hint: "Re-run: agent-swift snapshot -i", useJson: globals.json)
+                            hint: "Re-run: agent-swift snapshot -i", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
         guard let _ = Int(String(refKey.dropFirst())) else {
             Output.printError(code: "INVALID_INPUT", message: "Invalid ref format: \(ref)",
-                            hint: "Use @eN format (e.g. @e1)", useJson: globals.json)
+                            hint: "Use @eN format (e.g. @e1)", useJson: globals.useJson)
             throw ExitCode(2)
         }
         let index = Int(String(refKey.dropFirst()))! - 1
@@ -343,7 +363,7 @@ struct PressCommand: ParsableCommand {
 
         guard index >= 0 && index < elements.count else {
             Output.printError(code: "ELEMENT_NOT_FOUND", message: "Element \(ref) no longer exists (stale ref)",
-                            hint: "Re-run: agent-swift snapshot -i", useJson: globals.json)
+                            hint: "Re-run: agent-swift snapshot -i", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
@@ -354,14 +374,14 @@ struct PressCommand: ParsableCommand {
         }
 
         if acted {
-            if globals.json {
+            if globals.useJson {
                 print(Output.json(PressResult(pressed: ref, success: true)))
             } else {
                 print("Pressed \(ref)")
             }
         } else {
             Output.printError(code: "ACTION_NOT_SUPPORTED", message: "Cannot press \(ref)",
-                            hint: "Pick a different target from snapshot", useJson: globals.json)
+                            hint: "Pick a different target from snapshot", useJson: globals.useJson)
             throw ExitCode(2)
         }
     }
@@ -440,22 +460,22 @@ struct FillCommand: ParsableCommand {
 
         guard session.isConnected, let pid = session.pid else {
             Output.printError(code: "NOT_CONNECTED", message: "No active session",
-                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.json)
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
-        let resolved = try resolveRef(ref, session: session, pid: pid, useJson: globals.json)
+        let resolved = try resolveRef(ref, session: session, pid: pid, useJson: globals.useJson)
         let success = AXClient.performFill(element: resolved.element, text: text)
 
         if success {
-            if globals.json {
+            if globals.useJson {
                 print(Output.json(FillResult(filled: ref, text: text, success: true)))
             } else {
                 print("Filled \(ref) with \"\(text)\"")
             }
         } else {
             Output.printError(code: "ACTION_NOT_SUPPORTED", message: "Cannot fill \(ref)",
-                            hint: "Element may not accept text input. Use a textfield or textarea.", useJson: globals.json)
+                            hint: "Element may not accept text input. Use a textfield or textarea.", useJson: globals.useJson)
             throw ExitCode(2)
         }
     }
@@ -499,36 +519,36 @@ struct GetCommand: ParsableCommand {
 
         guard session.isConnected, let pid = session.pid else {
             Output.printError(code: "NOT_CONNECTED", message: "No active session",
-                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.json)
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
-        let resolved = try resolveRef(ref, session: session, pid: pid, useJson: globals.json)
+        let resolved = try resolveRef(ref, session: session, pid: pid, useJson: globals.useJson)
         let node = resolved.node
 
         switch property {
         case "text":
             let text = node.displayLabel
-            if globals.json {
+            if globals.useJson {
                 print(Output.json(GetResult(ref: ref, property: "text", value: text)))
             } else {
                 print(text ?? "")
             }
         case "type":
             let type = node.displayType
-            if globals.json {
+            if globals.useJson {
                 print(Output.json(GetResult(ref: ref, property: "type", value: type)))
             } else {
                 print(type)
             }
         case "role":
-            if globals.json {
+            if globals.useJson {
                 print(Output.json(GetResult(ref: ref, property: "role", value: node.role)))
             } else {
                 print(node.role)
             }
         case "identifier":
-            if globals.json {
+            if globals.useJson {
                 print(Output.json(GetResult(ref: ref, property: "identifier", value: node.identifier)))
             } else {
                 print(node.identifier ?? "")
@@ -546,7 +566,7 @@ struct GetCommand: ParsableCommand {
                 bounds: node.bounds,
                 actions: node.actions
             )
-            if globals.json {
+            if globals.useJson {
                 print(Output.json(attrs))
             } else {
                 print("role: \(node.role)")
@@ -561,7 +581,7 @@ struct GetCommand: ParsableCommand {
             }
         default:
             Output.printError(code: "INVALID_ARGS", message: "Unknown property: \(property)",
-                            hint: "Use: text, type, role, identifier, or attrs", useJson: globals.json)
+                            hint: "Use: text, type, role, identifier, or attrs", useJson: globals.useJson)
             throw ExitCode(2)
         }
     }
@@ -619,7 +639,7 @@ struct FindCommand: ParsableCommand {
 
         guard session.isConnected, let pid = session.pid else {
             Output.printError(code: "NOT_CONNECTED", message: "No active session",
-                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.json)
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
@@ -648,7 +668,7 @@ struct FindCommand: ParsableCommand {
                 }
             default:
                 Output.printError(code: "INVALID_ARGS", message: "Unknown locator: \(locator)",
-                                hint: "Use: role, text, or identifier", useJson: globals.json)
+                                hint: "Use: role, text, or identifier", useJson: globals.useJson)
                 throw ExitCode(2)
             }
             if matchIndex != nil { break }
@@ -656,7 +676,7 @@ struct FindCommand: ParsableCommand {
 
         guard let idx = matchIndex else {
             Output.printError(code: "ELEMENT_NOT_FOUND", message: "No element matches \(locator)=\"\(value)\"",
-                            hint: "Re-run: agent-swift snapshot -i", useJson: globals.json)
+                            hint: "Re-run: agent-swift snapshot -i", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
@@ -665,7 +685,7 @@ struct FindCommand: ParsableCommand {
 
         // If no chained action, just print the match
         guard let action = action else {
-            if globals.json {
+            if globals.useJson {
                 print(Output.json(FindResult(ref: matchedRef, type: matchedNode.displayType,
                                             label: matchedNode.displayLabel, identifier: matchedNode.identifier)))
             } else {
@@ -683,7 +703,7 @@ struct FindCommand: ParsableCommand {
 
         guard idx < elements.count else {
             Output.printError(code: "ELEMENT_NOT_FOUND", message: "Element \(matchedRef) no longer exists",
-                            hint: "Re-run: agent-swift snapshot -i", useJson: globals.json)
+                            hint: "Re-run: agent-swift snapshot -i", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
@@ -694,32 +714,32 @@ struct FindCommand: ParsableCommand {
             var acted = AXClient.performPress(element: target, actionName: "AXPress")
             if !acted { acted = AXClient.performPress(element: target, actionName: "AXConfirm") }
             if acted {
-                if globals.json {
+                if globals.useJson {
                     print(Output.json(FindActionResult(found: matchedRef, action: "press", success: true)))
                 } else {
                     print("Found \(matchedRef) → pressed")
                 }
             } else {
                 Output.printError(code: "ACTION_NOT_SUPPORTED", message: "Cannot press \(matchedRef)",
-                                hint: "Pick a different target", useJson: globals.json)
+                                hint: "Pick a different target", useJson: globals.useJson)
                 throw ExitCode(2)
             }
         case "fill":
             guard let text = actionArg else {
                 Output.printError(code: "INVALID_ARGS", message: "fill requires text argument",
-                                hint: "Example: agent-swift find identifier \"field\" fill \"text\"", useJson: globals.json)
+                                hint: "Example: agent-swift find identifier \"field\" fill \"text\"", useJson: globals.useJson)
                 throw ExitCode(2)
             }
             let success = AXClient.performFill(element: target, text: text)
             if success {
-                if globals.json {
+                if globals.useJson {
                     print(Output.json(FindFillResult(found: matchedRef, action: "fill", text: text, success: true)))
                 } else {
                     print("Found \(matchedRef) → filled with \"\(text)\"")
                 }
             } else {
                 Output.printError(code: "ACTION_NOT_SUPPORTED", message: "Cannot fill \(matchedRef)",
-                                hint: "Element may not accept text input", useJson: globals.json)
+                                hint: "Element may not accept text input", useJson: globals.useJson)
                 throw ExitCode(2)
             }
         case "get":
@@ -732,14 +752,14 @@ struct FindCommand: ParsableCommand {
             case "identifier": val = matchedNode.identifier
             default: val = matchedNode.displayLabel
             }
-            if globals.json {
+            if globals.useJson {
                 print(Output.json(FindGetResult(found: matchedRef, action: "get", property: prop, value: val ?? "")))
             } else {
                 print(val ?? "")
             }
         default:
             Output.printError(code: "INVALID_ARGS", message: "Unknown action: \(action)",
-                            hint: "Use: press, fill, or get", useJson: globals.json)
+                            hint: "Use: press, fill, or get", useJson: globals.useJson)
             throw ExitCode(2)
         }
     }
@@ -766,13 +786,13 @@ struct ScreenshotCommand: ParsableCommand {
 
         guard session.isConnected, let pid = session.pid else {
             Output.printError(code: "NOT_CONNECTED", message: "No active session",
-                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.json)
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
         guard AXClient.isProcessRunning(pid: pid) else {
             Output.printError(code: "APP_NOT_RUNNING", message: "Target app (PID \(pid)) is no longer running",
-                            hint: "Reconnect with: agent-swift connect", useJson: globals.json)
+                            hint: "Reconnect with: agent-swift connect", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
@@ -780,14 +800,14 @@ struct ScreenshotCommand: ParsableCommand {
         let success = AXClient.captureScreenshot(pid: pid, path: outputPath)
 
         if success {
-            if globals.json {
+            if globals.useJson {
                 print(Output.json(ScreenshotResult(path: outputPath, success: true)))
             } else {
                 print("Screenshot saved to \(outputPath)")
             }
         } else {
             Output.printError(code: "SCREENSHOT_FAILED", message: "Failed to capture screenshot",
-                            hint: "Ensure the app window is visible on screen", useJson: globals.json)
+                            hint: "Ensure the app window is visible on screen", useJson: globals.useJson)
             throw ExitCode(2)
         }
     }
@@ -818,13 +838,13 @@ struct IsCommand: ParsableCommand {
 
         guard ["exists", "visible", "enabled", "focused"].contains(condition) else {
             Output.printError(code: "INVALID_ARGS", message: "Unknown condition: \(condition)",
-                            hint: "Use: exists, visible, enabled, or focused", useJson: globals.json)
+                            hint: "Use: exists, visible, enabled, or focused", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
         guard session.isConnected, let pid = session.pid else {
             // No session: element can't exist/be visible/enabled/focused → assertion false
-            if globals.json {
+            if globals.useJson {
                 print(Output.json(IsResult(ref: ref, condition: condition, result: false)))
             } else {
                 print("false")
@@ -843,7 +863,7 @@ struct IsCommand: ParsableCommand {
 
         guard let numIndex = Int(String(refKey.dropFirst())) else {
             Output.printError(code: "INVALID_INPUT", message: "Invalid ref format: \(ref)",
-                            hint: "Use @eN format (e.g. @e1)", useJson: globals.json)
+                            hint: "Use @eN format (e.g. @e1)", useJson: globals.useJson)
             throw ExitCode(2)
         }
         let index = numIndex - 1
@@ -864,7 +884,7 @@ struct IsCommand: ParsableCommand {
             result = false
         }
 
-        if globals.json {
+        if globals.useJson {
             print(Output.json(IsResult(ref: ref, condition: condition, result: result)))
         } else {
             print(result ? "true" : "false")
@@ -890,11 +910,19 @@ struct WaitCommand: ParsableCommand {
     @Argument(help: "Target: ref (@e1) or text to match")
     var target: String?
 
-    @Option(name: .long, help: "Timeout in ms (default: 5000)")
-    var timeout: Int = 5000
+    @Option(name: .long, help: "Timeout in ms (default: 5000, or AGENT_SWIFT_TIMEOUT)")
+    var timeout: Int?
 
     @Option(name: .long, help: "Poll interval in ms (default: 250)")
     var interval: Int = 250
+
+    /// Resolved timeout: --timeout flag > AGENT_SWIFT_TIMEOUT env > 5000ms default
+    var resolvedTimeout: Int {
+        if let t = timeout { return t }
+        if let envStr = ProcessInfo.processInfo.environment["AGENT_SWIFT_TIMEOUT"],
+           let envVal = Int(envStr) { return envVal }
+        return 5000
+    }
 
     struct WaitResult: Codable {
         let condition: String
@@ -910,7 +938,7 @@ struct WaitCommand: ParsableCommand {
         // Simple delay: wait <ms>
         if let delayMs = Int(condition) {
             Thread.sleep(forTimeInterval: Double(delayMs) / 1000.0)
-            if globals.json {
+            if globals.useJson {
                 print(Output.json(WaitResult(condition: "delay", target: "\(delayMs)ms", success: true, elapsed: delayMs)))
             } else {
                 print("Waited \(delayMs)ms")
@@ -920,32 +948,32 @@ struct WaitCommand: ParsableCommand {
 
         guard session.isConnected, let pid = session.pid else {
             Output.printError(code: "NOT_CONNECTED", message: "No active session",
-                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.json)
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
         guard ["exists", "visible", "text", "gone"].contains(condition) else {
             Output.printError(code: "INVALID_ARGS", message: "Unknown condition: \(condition)",
-                            hint: "Use: exists, visible, text, gone, or a delay in ms", useJson: globals.json)
+                            hint: "Use: exists, visible, text, gone, or a delay in ms", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
         guard let target = target else {
             Output.printError(code: "INVALID_ARGS", message: "Missing target for condition '\(condition)'",
-                            hint: "Example: agent-swift wait exists @e1", useJson: globals.json)
+                            hint: "Example: agent-swift wait exists @e1", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
         let useInteractive = session.interactiveSnapshot ?? false
         let startTime = Date()
-        let timeoutSec = Double(timeout) / 1000.0
+        let timeoutSec = Double(resolvedTimeout) / 1000.0
         let intervalSec = Double(interval) / 1000.0
 
         while true {
             let elapsed = Date().timeIntervalSince(startTime)
             if elapsed >= timeoutSec {
-                Output.printError(code: "TIMEOUT", message: "Timed out waiting for \(condition) \(target) after \(timeout)ms",
-                                hint: "Increase --timeout or verify target state", useJson: globals.json)
+                Output.printError(code: "TIMEOUT", message: "Timed out waiting for \(condition) \(target) after \(resolvedTimeout)ms",
+                                hint: "Increase --timeout or verify target state", useJson: globals.useJson)
                 throw ExitCode(2)
             }
 
@@ -985,7 +1013,7 @@ struct WaitCommand: ParsableCommand {
 
             if conditionMet {
                 let elapsedMs = Int(Date().timeIntervalSince(startTime) * 1000)
-                if globals.json {
+                if globals.useJson {
                     print(Output.json(WaitResult(condition: condition, target: target, success: true, elapsed: elapsedMs)))
                 } else {
                     print("Condition met: \(condition) \(target) (\(elapsedMs)ms)")
@@ -1001,7 +1029,7 @@ struct WaitCommand: ParsableCommand {
 // MARK: - Scroll
 
 struct ScrollCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "scroll", abstract: "Scroll element or direction")
+    static let configuration = CommandConfiguration(commandName: "scroll", abstract: "Scroll by direction or element ref")
 
     @OptionGroup var globals: GlobalOptions
 
@@ -1022,13 +1050,13 @@ struct ScrollCommand: ParsableCommand {
 
         guard session.isConnected, let pid = session.pid else {
             Output.printError(code: "NOT_CONNECTED", message: "No active session",
-                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.json)
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
         guard AXClient.isProcessRunning(pid: pid) else {
             Output.printError(code: "APP_NOT_RUNNING", message: "Target app (PID \(pid)) is no longer running",
-                            hint: "Reconnect with: agent-swift connect", useJson: globals.json)
+                            hint: "Reconnect with: agent-swift connect", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
@@ -1042,22 +1070,22 @@ struct ScrollCommand: ParsableCommand {
                     Thread.sleep(forTimeInterval: 0.1)
                 }
                 event.post(tap: .cgSessionEventTap)
-                if globals.json {
+                if globals.useJson {
                     print(Output.json(ScrollResult(target: target, success: true)))
                 } else {
                     print("Scrolled \(target)")
                 }
             } else {
                 Output.printError(code: "SCROLL_FAILED", message: "Failed to create scroll event",
-                                hint: "Ensure Accessibility permission is granted", useJson: globals.json)
+                                hint: "Ensure Accessibility permission is granted", useJson: globals.useJson)
                 throw ExitCode(2)
             }
         default:
             // Treat as ref — scroll element into view
-            let resolved = try resolveRef(target, session: session, pid: pid, useJson: globals.json)
+            let resolved = try resolveRef(target, session: session, pid: pid, useJson: globals.useJson)
             let acted = AXClient.performPress(element: resolved.element, actionName: "AXScrollToVisible")
             if acted {
-                if globals.json {
+                if globals.useJson {
                     print(Output.json(ScrollResult(target: target, success: true)))
                 } else {
                     print("Scrolled \(target) into view")
@@ -1065,7 +1093,7 @@ struct ScrollCommand: ParsableCommand {
             } else {
                 // Fallback: try to scroll the parent scroll area
                 Output.printError(code: "SCROLL_FAILED", message: "Cannot scroll \(target) into view",
-                                hint: "Try: agent-swift scroll up/down", useJson: globals.json)
+                                hint: "Try: agent-swift scroll up/down", useJson: globals.useJson)
                 throw ExitCode(2)
             }
         }

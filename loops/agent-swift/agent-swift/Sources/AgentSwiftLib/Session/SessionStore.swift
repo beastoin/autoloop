@@ -46,9 +46,14 @@ public struct SessionData: Codable {
 }
 
 public struct SessionStore {
-    static let defaultPath = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".agent-swift")
-        .appendingPathComponent("session.json")
+    static let defaultPath: URL = {
+        if let home = ProcessInfo.processInfo.environment["AGENT_SWIFT_HOME"] {
+            return URL(fileURLWithPath: home).appendingPathComponent("session.json")
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".agent-swift")
+            .appendingPathComponent("session.json")
+    }()
 
     public let path: URL
 

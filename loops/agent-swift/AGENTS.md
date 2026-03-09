@@ -153,8 +153,38 @@ Guidance:
 | `find` | Depends | Depends | Safe without action; caution with chained mutating actions |
 | `wait` | Yes | Safe | Polling/read-only |
 | `is` | Yes | Safe | Assertion-only |
+| `scroll` | No | Caution | Multiple scrolls compound |
 | `screenshot` | Yes | Safe | Overwrites path if reused |
 | `schema` | Yes | Safe | Static metadata |
+
+## Environment variables
+
+| Variable | Purpose | Default | CLI override |
+|----------|---------|---------|-------------|
+| `AGENT_SWIFT_JSON` | Force JSON output when `=1` | unset | `--json` flag |
+| `AGENT_SWIFT_TIMEOUT` | Default wait timeout in ms | `5000` | `--timeout` flag |
+| `AGENT_SWIFT_HOME` | Session directory path | `~/.agent-swift` | none |
+
+Precedence: CLI flag > env var > built-in default.
+
+## JSON-first usage
+
+agent-swift auto-detects output mode:
+1. `--json` flag → JSON
+2. `AGENT_SWIFT_JSON=1` → JSON
+3. Non-TTY (piped) → JSON automatically
+4. Otherwise → human-readable
+
+```bash
+# Explicit JSON
+agent-swift status --json
+
+# Env var JSON
+AGENT_SWIFT_JSON=1 agent-swift status
+
+# Auto-JSON when piped
+agent-swift snapshot -i | jq '.[] | .ref'
+```
 
 ## Recipes
 
@@ -173,6 +203,36 @@ agent-swift press @e4
 # if ELEMENT_NOT_FOUND:
 agent-swift snapshot -i
 agent-swift press @e2
+```
+
+### Scroll through content
+```bash
+# Scroll down in active window
+agent-swift scroll down
+
+# Scroll up
+agent-swift scroll up
+
+# Scroll specific element into view
+agent-swift scroll @e15
+```
+
+### Wait and assert
+```bash
+# Wait for element to appear
+agent-swift wait exists @e1
+
+# Wait for text to appear anywhere
+agent-swift wait text "Welcome"
+
+# Assert element is visible (exit 1 if not)
+agent-swift is visible @e3
+
+# Wait with custom timeout
+agent-swift wait exists @e1 --timeout 10000
+
+# Simple delay
+agent-swift wait 2000
 ```
 
 ### JSON-first automation
@@ -199,6 +259,33 @@ agent-swift snapshot -i --json
 - Do not weaken evaluator thresholds
 - Do not skip required e2e gates when enabled
 - Keep evidence reproducible
+
+## CLAUDE.md snippet
+
+Add this to your macOS project's CLAUDE.md to enable agent-swift automation:
+
+```markdown
+## macOS UI Automation (agent-swift)
+
+This project supports automated UI testing via agent-swift.
+
+### Setup
+- Ensure Accessibility trust is granted to your terminal
+- `brew install beastoin/tap/agent-swift` or download from GitHub releases
+
+### Workflow
+1. `agent-swift connect --bundle-id <your-app-bundle-id>`
+2. `agent-swift snapshot -i` — capture interactive element refs
+3. `agent-swift press @eN` / `agent-swift fill @eN "text"` — interact
+4. `agent-swift wait text "expected"` — verify outcomes
+5. `agent-swift disconnect`
+
+### Key facts
+- Exit codes: 0=success, 1=assertion false, 2=error
+- `--json` flag or pipe to get JSON output
+- `AGENT_SWIFT_TIMEOUT=10000` for slow UI transitions
+- Re-snapshot after any mutation (refs may stale)
+```
 
 ## Blocked protocol
 
