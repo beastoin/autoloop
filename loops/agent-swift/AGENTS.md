@@ -53,7 +53,7 @@ agent-swift disconnect
 ```
 
 - `status` and `doctor` are safe in any state.
-- `snapshot`, `press`, `fill`, `get`, `find`, `wait`, `is`, `screenshot` require connected state.
+- `snapshot`, `press`, `click`, `fill`, `get`, `find`, `wait`, `is`, `screenshot` require connected state.
 - Mutating actions can stale refs; refresh with `snapshot`.
 
 ## Output shapes
@@ -148,6 +148,7 @@ Guidance:
 | `status` | Yes | Safe | Read-only |
 | `snapshot` | Yes | Safe | Refreshes refs |
 | `press` | No | Caution | Action may trigger twice |
+| `click` | No | Caution | Mouse click may trigger twice; use for SwiftUI NavigationLink |
 | `fill` | No | Caution | Text may duplicate/replace unexpectedly |
 | `get` | Yes | Safe | Read-only |
 | `find` | Depends | Depends | Safe without action; caution with chained mutating actions |
@@ -216,6 +217,17 @@ agent-swift scroll up
 # Scroll specific element into view
 agent-swift scroll @e15
 ```
+
+### Click (CGEvent mouse click)
+```bash
+# Click element by ref (for SwiftUI NavigationLink, sidebar items)
+agent-swift click @e1
+
+# Click at absolute coordinates
+agent-swift click 250 400
+```
+
+> **`press` vs `click`**: `press` sends `AXPress` (accessibility action) — works for standard buttons/controls. `click` sends `CGEvent` mouse down/up — works for SwiftUI NavigationLink and gesture-based controls that ignore AXPress.
 
 ### Wait and assert
 ```bash

@@ -8,7 +8,7 @@ struct AgentSwift: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "agent-swift",
         abstract: "CLI for AI agents to control macOS apps via Accessibility API",
-        version: "0.2.0",
+        version: "0.2.1",
         subcommands: [
             DoctorCommand.self,
             ConnectCommand.self,
@@ -23,6 +23,7 @@ struct AgentSwift: ParsableCommand {
             IsCommand.self,
             WaitCommand.self,
             ScrollCommand.self,
+            ClickCommand.self,
             SchemaCommand.self
         ]
     )
@@ -1100,6 +1101,86 @@ struct ScrollCommand: ParsableCommand {
     }
 }
 
+// MARK: - Click
+
+struct ClickCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "click", abstract: "Click element or coordinates via CGEvent")
+
+    @OptionGroup var globals: GlobalOptions
+
+    @Argument(help: "Target: @ref or x-coordinate")
+    var target: String
+
+    @Argument(help: "Y-coordinate (when using x y)")
+    var y: Double?
+
+    struct ClickResult: Codable {
+        let clicked: String
+        let x: Double
+        let y: Double
+        let success: Bool
+    }
+
+    func run() throws {
+        let store = SessionStore()
+        let session = store.load()
+
+        guard session.isConnected, let pid = session.pid else {
+            Output.printError(code: "NOT_CONNECTED", message: "No active session",
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        guard AXClient.isProcessRunning(pid: pid) else {
+            Output.printError(code: "APP_NOT_RUNNING", message: "Target app (PID \(pid)) is no longer running",
+                            hint: "Reconnect with: agent-swift connect", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        let clickPoint: CGPoint
+        let clickLabel: String
+
+        if target.hasPrefix("@") || target.hasPrefix("e") {
+            // Ref-based click
+            let resolved = try resolveRef(target, session: session, pid: pid, useJson: globals.useJson)
+            guard let pos = resolved.node.position, let sz = resolved.node.size else {
+                Output.printError(code: "NO_BOUNDS", message: "Element \(target) has no position/size",
+                                hint: "Element may be offscreen. Try: agent-swift scroll \(target)", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            clickPoint = CGPoint(x: pos.x + sz.width / 2, y: pos.y + sz.height / 2)
+            clickLabel = target.hasPrefix("@") ? target : "@\(target)"
+        } else {
+            // Coordinate-based click
+            guard let x = Double(target), let yCoord = y else {
+                Output.printError(code: "INVALID_INPUT", message: "Invalid click target: \(target)",
+                                hint: "Use @eN for element ref or 'x y' for coordinates", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            clickPoint = CGPoint(x: x, y: yCoord)
+            clickLabel = "\(Int(x)),\(Int(yCoord))"
+        }
+
+        // Bring app to front
+        if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
+            app.activate()
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+
+        if AXClient.performClick(at: clickPoint) {
+            if globals.useJson {
+                print(Output.json(ClickResult(clicked: clickLabel, x: clickPoint.x, y: clickPoint.y, success: true)))
+            } else {
+                print("Clicked \(clickLabel) at (\(Int(clickPoint.x)), \(Int(clickPoint.y)))")
+            }
+        } else {
+            Output.printError(code: "CLICK_FAILED", message: "Failed to create click event",
+                            hint: "Ensure Accessibility permission is granted", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+    }
+}
+
 // MARK: - Schema
 
 // CommandSchema is defined in AgentSwiftLib/Output/CommandSchema.swift
@@ -1163,6 +1244,11 @@ func allSchemas() -> [CommandSchema] { return [
             .init(name: "--amount", type: "int", defaultValue: "5"),
             .init(name: "--json", type: "bool", defaultValue: "false")
         ], exitCodes: ["0": "success", "2": "error"]),
+    CommandSchema(name: "click", description: "Click element or coordinates via CGEvent",
+        args: [.init(name: "target", type: "string", required: true),
+               .init(name: "y", type: "number", required: false)],
+        flags: [.init(name: "--json", type: "bool", defaultValue: "false")],
+        exitCodes: ["0": "success", "2": "error"]),
     CommandSchema(name: "schema", description: "Show command schema",
         args: [.init(name: "command", type: "string", required: false)],
         flags: [], exitCodes: ["0": "success", "2": "error"]),

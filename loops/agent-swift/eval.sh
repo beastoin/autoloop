@@ -39,7 +39,7 @@ except Exception:
 core_commands = {"doctor", "connect", "disconnect", "status", "snapshot", "press"}
 full_commands = {
     "doctor", "connect", "disconnect", "status", "snapshot", "press", "fill",
-    "get", "find", "wait", "is", "scroll", "screenshot", "schema"
+    "get", "find", "wait", "is", "scroll", "screenshot", "schema", "click"
 }
 
 if mode == "json":
@@ -120,6 +120,9 @@ if [ -f "loops/agent-swift/program-phase5.md" ]; then
 fi
 if [ -f "loops/agent-swift/program-phase2b.md" ]; then
   PHASE=6  # 2b widget coverage supplement
+fi
+if [ -f "loops/agent-swift/program-phase6.md" ]; then
+  PHASE=7  # click command
 fi
 echo "phase:            $PHASE"
 
@@ -232,6 +235,12 @@ if [ "$CLI_STATUS" = "pass" ]; then
       fi
     done
   fi
+  if [ "$PHASE" -ge 7 ]; then
+    HELP_TOTAL=$((HELP_TOTAL + 1))
+    if command_exists_in_help "click"; then
+      HELP_PASS=$((HELP_PASS + 1))
+    fi
+  fi
   if [ "$HELP_PASS" -eq "$HELP_TOTAL" ]; then
     HELP_STATUS="pass"
     C_PASS=$((C_PASS + 1))
@@ -264,6 +273,12 @@ if [ "$CLI_STATUS" = "pass" ]; then
         PCH_PASS=$((PCH_PASS + 1))
       fi
     done
+  fi
+  if [ "$PHASE" -ge 7 ]; then
+    PCH_TOTAL=$((PCH_TOTAL + 1))
+    if "$BINARY_PATH" click --help > /dev/null 2>&1; then
+      PCH_PASS=$((PCH_PASS + 1))
+    fi
   fi
   C_TOTAL=$((C_TOTAL + 1))
   if [ "$PCH_PASS" -eq "$PCH_TOTAL" ]; then
@@ -329,6 +344,15 @@ if [ "$CLI_STATUS" = "pass" ]; then
     fi
   fi
 
+  if [ "$PHASE" -ge 7 ]; then
+    # click --json on invalid ref returns valid JSON error
+    J_TOTAL=$((J_TOTAL + 1))
+    "$BINARY_PATH" click @e999999 --json > /tmp/as-eval-click.json 2>&1 || true
+    if json_check /tmp/as-eval-click.json json; then
+      J_PASS=$((J_PASS + 1))
+    fi
+  fi
+
   C_TOTAL=$((C_TOTAL + 1))
   if [ "$J_PASS" -eq "$J_TOTAL" ]; then
     JSON_STATUS="pass"
@@ -383,6 +407,16 @@ if [ "$CLI_STATUS" = "pass" ]; then
     "$BINARY_PATH" is exists @e999999 > /dev/null 2>&1
     IS_EC=$?
     if [ "$IS_EC" -eq 1 ] || [ "$IS_EC" -eq 2 ]; then
+      E_PASS=$((E_PASS + 1))
+    fi
+  fi
+
+  if [ "$PHASE" -ge 7 ]; then
+    # click on invalid ref should exit 2
+    E_TOTAL=$((E_TOTAL + 1))
+    "$BINARY_PATH" click @e999999 > /dev/null 2>&1
+    CLICK_EC=$?
+    if [ "$CLICK_EC" -eq 2 ]; then
       E_PASS=$((E_PASS + 1))
     fi
   fi
@@ -618,10 +652,10 @@ if [ "$PHASE" -ge 5 ] && [ "$CLI_STATUS" = "pass" ]; then
   P5_PASS=0
   P5_TOTAL=0
 
-  # Gate 1: version is 0.2.0
+  # Gate 1: version is 0.2.x
   P5_TOTAL=$((P5_TOTAL + 1))
   VERSION_OUT=$("$BINARY_PATH" --version 2>&1 || true)
-  if echo "$VERSION_OUT" | grep -q "0.2.0"; then
+  if echo "$VERSION_OUT" | grep -qE "0\.2\.[0-9]+"; then
     P5_PASS=$((P5_PASS + 1))
   fi
 
@@ -754,6 +788,80 @@ if [ "$PHASE" -ge 6 ] && [ "$TEST_STATUS" = "pass" ]; then
 fi
 echo "p2b_widget_cov:   $P2B_WIDGET"
 
+# Phase 7 gates: Click command
+P7_CLICK="skip"
+if [ "$PHASE" -ge 7 ] && [ "$CLI_STATUS" = "pass" ]; then
+  P7_PASS=0
+  P7_TOTAL=0
+
+  # Gate 1: click command exists in help
+  P7_TOTAL=$((P7_TOTAL + 1))
+  if command_exists_in_help "click"; then
+    P7_PASS=$((P7_PASS + 1))
+  fi
+
+  # Gate 2: version is 0.2.1
+  P7_TOTAL=$((P7_TOTAL + 1))
+  VERSION_OUT=$("$BINARY_PATH" --version 2>&1 || true)
+  if echo "$VERSION_OUT" | grep -q "0.2.1"; then
+    P7_PASS=$((P7_PASS + 1))
+  fi
+
+  # Gate 3: performClick exists in AXClient.swift
+  P7_TOTAL=$((P7_TOTAL + 1))
+  if grep -q "performClick" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/AX/AXClient.swift" 2>/dev/null; then
+    P7_PASS=$((P7_PASS + 1))
+  fi
+
+  # Gate 4: schema lists 15 commands
+  P7_TOTAL=$((P7_TOTAL + 1))
+  "$BINARY_PATH" schema > /tmp/as-eval-schema7.json 2>&1 || true
+  SCHEMA_COUNT=$(python3 -c "import json; d=json.load(open('/tmp/as-eval-schema7.json')); print(len(d))" 2>/dev/null || echo "0")
+  if [ "$SCHEMA_COUNT" -ge 15 ]; then
+    P7_PASS=$((P7_PASS + 1))
+  fi
+
+  # Gate 5: click on invalid ref exits 2
+  P7_TOTAL=$((P7_TOTAL + 1))
+  "$BINARY_PATH" click @e999999 > /dev/null 2>&1
+  if [ $? -eq 2 ]; then
+    P7_PASS=$((P7_PASS + 1))
+  fi
+
+  # Gate 6: Tests >= 68 (63 existing + 5 new)
+  P7_TOTAL=$((P7_TOTAL + 1))
+  TEST_NUM=$(echo "$TEST_COUNT" | tr -dc '0-9')
+  if [ "$TEST_NUM" -ge 68 ]; then
+    P7_PASS=$((P7_PASS + 1))
+  fi
+
+  # Gate 7: AGENTS.md mentions click
+  P7_TOTAL=$((P7_TOTAL + 1))
+  AGENTS_FILE="loops/agent-swift/AGENTS.md"
+  if [ -f "$AGENTS_FILE" ] && grep -q "click" "$AGENTS_FILE"; then
+    P7_PASS=$((P7_PASS + 1))
+  fi
+
+  # Gate 8: Live click test — connect to Finder, click command doesn't crash
+  P7_TOTAL=$((P7_TOTAL + 1))
+  if [ -x "$BINARY_PATH" ]; then
+    "$BINARY_PATH" connect --bundle-id com.apple.finder --json > /dev/null 2>&1 || true
+    "$BINARY_PATH" snapshot -i --json > /dev/null 2>&1 || true
+    "$BINARY_PATH" click @e1 --json > /tmp/as-eval-click-live.json 2>&1 || true
+    "$BINARY_PATH" disconnect --json > /dev/null 2>&1 || true
+    if json_check /tmp/as-eval-click-live.json json; then
+      P7_PASS=$((P7_PASS + 1))
+    fi
+  fi
+
+  if [ "$P7_PASS" -eq "$P7_TOTAL" ]; then
+    P7_CLICK="pass"
+  else
+    P7_CLICK="fail ($P7_PASS/$P7_TOTAL)"
+  fi
+fi
+echo "p7_click:         $P7_CLICK"
+
 # Step 5: E2E test (optional; enabled when e2e-test.sh exists)
 E2E_STATUS="skip"
 if [ -x "loops/agent-swift/e2e-test.sh" ]; then
@@ -824,6 +932,18 @@ if [ "$BUILD_STATUS" = "pass" ] && [ "$TEST_STATUS" = "pass" ] && [ "$CONTRACT_S
          [ "$P4_AUTONOMY" = "pass" ] && \
          [ "$P5_POLISH" = "pass" ] && \
          [ "$P2B_WIDGET" = "pass" ]; then
+        PHASE_COMPLETE="yes"
+      fi
+      ;;
+    7)
+      if [ "$HELP_STATUS" = "pass" ] && \
+         [ "$JSON_STATUS" = "pass" ] && \
+         [ "$EXIT_STATUS" = "pass" ] && \
+         [ "$P3_INTERACTION" = "pass" ] && \
+         [ "$P4_AUTONOMY" = "pass" ] && \
+         [ "$P5_POLISH" = "pass" ] && \
+         [ "$P2B_WIDGET" = "pass" ] && \
+         [ "$P7_CLICK" = "pass" ]; then
         PHASE_COMPLETE="yes"
       fi
       ;;

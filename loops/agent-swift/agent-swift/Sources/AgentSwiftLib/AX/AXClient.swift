@@ -338,6 +338,17 @@ public class AXClient {
         return AXUIElementPerformAction(element, actionName as CFString) == .success
     }
 
+    public static func performClick(at point: CGPoint) -> Bool {
+        guard let mouseDown = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
+              let mouseUp = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else {
+            return false
+        }
+        mouseDown.post(tap: .cgSessionEventTap)
+        Thread.sleep(forTimeInterval: 0.05)
+        mouseUp.post(tap: .cgSessionEventTap)
+        return true
+    }
+
     public static func performFill(element: AXUIElement, text: String) -> Bool {
         AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, true as CFTypeRef)
         return AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, text as CFTypeRef) == .success
