@@ -38,8 +38,8 @@ except Exception:
 
 core_commands = {"doctor", "connect", "disconnect", "status", "snapshot", "press"}
 full_commands = {
-    "doctor", "connect", "disconnect", "snapshot", "press", "fill",
-    "get", "find", "wait", "is", "screenshot", "schema"
+    "doctor", "connect", "disconnect", "status", "snapshot", "press", "fill",
+    "get", "find", "wait", "is", "scroll", "screenshot", "schema"
 }
 
 if mode == "json":
@@ -111,6 +111,9 @@ if [ -f "loops/agent-swift/program-phase2.md" ]; then
 fi
 if [ -f "loops/agent-swift/program-phase3.md" ]; then
   PHASE=3
+fi
+if [ -f "loops/agent-swift/program-phase4.md" ]; then
+  PHASE=4
 fi
 echo "phase:            $PHASE"
 
@@ -521,6 +524,88 @@ if [ "$PHASE" -ge 3 ] && [ "$CLI_STATUS" = "pass" ]; then
 fi
 echo "p3_interaction:   $P3_INTERACTION"
 
+# Step 4d: Phase 4 autonomy gates
+P4_AUTONOMY="skip"
+if [ "$PHASE" -ge 4 ] && [ "$CLI_STATUS" = "pass" ]; then
+  P4_PASS=0
+  P4_TOTAL=0
+
+  # Gate 1: is command exists in help
+  P4_TOTAL=$((P4_TOTAL + 1))
+  if command_exists_in_help "is"; then
+    P4_PASS=$((P4_PASS + 1))
+  fi
+
+  # Gate 2: wait command exists in help
+  P4_TOTAL=$((P4_TOTAL + 1))
+  if command_exists_in_help "wait"; then
+    P4_PASS=$((P4_PASS + 1))
+  fi
+
+  # Gate 3: scroll command exists in help
+  P4_TOTAL=$((P4_TOTAL + 1))
+  if command_exists_in_help "scroll"; then
+    P4_PASS=$((P4_PASS + 1))
+  fi
+
+  # Gate 4: schema command exists in help
+  P4_TOTAL=$((P4_TOTAL + 1))
+  if command_exists_in_help "schema"; then
+    P4_PASS=$((P4_PASS + 1))
+  fi
+
+  # Gate 5: is exits 1 for false assertion (not 2)
+  P4_TOTAL=$((P4_TOTAL + 1))
+  "$BINARY_PATH" is exists @e999999 > /dev/null 2>&1
+  IS_EC=$?
+  if [ "$IS_EC" -eq 1 ]; then
+    P4_PASS=$((P4_PASS + 1))
+  fi
+
+  # Gate 6: schema returns valid JSON array
+  P4_TOTAL=$((P4_TOTAL + 1))
+  "$BINARY_PATH" schema > /tmp/as-eval-schema.json 2>&1 || true
+  if json_check /tmp/as-eval-schema.json array; then
+    P4_PASS=$((P4_PASS + 1))
+  fi
+
+  # Gate 7: schema press returns valid JSON object
+  P4_TOTAL=$((P4_TOTAL + 1))
+  "$BINARY_PATH" schema press > /tmp/as-eval-schema-press.json 2>&1 || true
+  if json_check /tmp/as-eval-schema-press.json schema-press; then
+    P4_PASS=$((P4_PASS + 1))
+  fi
+
+  # Gate 8: schema lists all commands
+  P4_TOTAL=$((P4_TOTAL + 1))
+  if json_check /tmp/as-eval-schema.json schema-full; then
+    P4_PASS=$((P4_PASS + 1))
+  fi
+
+  # Gate 9: wait <ms> exits 0
+  P4_TOTAL=$((P4_TOTAL + 1))
+  "$BINARY_PATH" wait 100 > /dev/null 2>&1
+  if [ $? -eq 0 ]; then
+    P4_PASS=$((P4_PASS + 1))
+  fi
+
+  # Gate 10: AutonomyTests.swift exists with >= 20 assertions
+  P4_TOTAL=$((P4_TOTAL + 1))
+  if [ -f "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/AutonomyTests.swift" ]; then
+    AT_ASSERTIONS=$(grep -cE "XCTAssert" "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/AutonomyTests.swift" 2>/dev/null || echo "0")
+    if [ "$AT_ASSERTIONS" -ge 20 ]; then
+      P4_PASS=$((P4_PASS + 1))
+    fi
+  fi
+
+  if [ "$P4_PASS" -eq "$P4_TOTAL" ]; then
+    P4_AUTONOMY="pass"
+  else
+    P4_AUTONOMY="fail ($P4_PASS/$P4_TOTAL)"
+  fi
+fi
+echo "p4_autonomy:      $P4_AUTONOMY"
+
 # Step 5: E2E test (optional; enabled when e2e-test.sh exists)
 E2E_STATUS="skip"
 if [ -x "loops/agent-swift/e2e-test.sh" ]; then
@@ -561,6 +646,15 @@ if [ "$BUILD_STATUS" = "pass" ] && [ "$TEST_STATUS" = "pass" ] && [ "$CONTRACT_S
          [ "$JSON_STATUS" = "pass" ] && \
          [ "$EXIT_STATUS" = "pass" ] && \
          [ "$P3_INTERACTION" = "pass" ]; then
+        PHASE_COMPLETE="yes"
+      fi
+      ;;
+    4)
+      if [ "$HELP_STATUS" = "pass" ] && \
+         [ "$JSON_STATUS" = "pass" ] && \
+         [ "$EXIT_STATUS" = "pass" ] && \
+         [ "$P3_INTERACTION" = "pass" ] && \
+         [ "$P4_AUTONOMY" = "pass" ]; then
         PHASE_COMPLETE="yes"
       fi
       ;;
