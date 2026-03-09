@@ -336,6 +336,44 @@ echo "help_contract:    $HELP_STATUS"
 echo "json_contract:    $JSON_STATUS"
 echo "exit_codes:       $EXIT_STATUS"
 
+# Step 4b: Widget coverage gates (phase 2+)
+P2_WIDGET_COV="skip"
+if [ "$PHASE" -ge 2 ] && [ -f "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/WidgetCoverageTests.swift" ]; then
+  P2_PASS=0
+
+  # Gate 1: WidgetCoverageTests.swift exists
+  P2_PASS=$((P2_PASS + 1))
+
+  # Gate 2: Tests pass (already checked by step 2, just need the file to exist)
+  if [ "$TEST_STATUS" = "pass" ]; then
+    P2_PASS=$((P2_PASS + 1))
+  fi
+
+  # Gate 3: ROLE_MAP has >= 50 entries (count static let entries in ROLE_MAP or displayType mappings)
+  ROLE_COUNT=$(grep -cE '"AX[A-Za-z]+"\s*:' "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/AX/AXClient.swift" 2>/dev/null || echo "0")
+  if [ "$ROLE_COUNT" -ge 50 ]; then
+    P2_PASS=$((P2_PASS + 1))
+  fi
+
+  # Gate 4: WIDGET_SUPPORT.md exists
+  if [ -f "$AGENT_SWIFT_DIR/WIDGET_SUPPORT.md" ]; then
+    P2_PASS=$((P2_PASS + 1))
+  fi
+
+  # Gate 5: >= 50 XCTAssert calls in widget coverage tests
+  WC_ASSERTIONS=$(grep -cE "XCTAssert" "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/WidgetCoverageTests.swift" 2>/dev/null || echo "0")
+  if [ "$WC_ASSERTIONS" -ge 50 ]; then
+    P2_PASS=$((P2_PASS + 1))
+  fi
+
+  if [ "$P2_PASS" -ge 5 ]; then
+    P2_WIDGET_COV="pass"
+  else
+    P2_WIDGET_COV="fail ($P2_PASS/5)"
+  fi
+fi
+echo "p2_widget_cov:    $P2_WIDGET_COV"
+
 # Step 5: E2E test (optional; enabled when e2e-test.sh exists)
 E2E_STATUS="skip"
 if [ -x "loops/agent-swift/e2e-test.sh" ]; then
@@ -367,7 +405,7 @@ if [ "$BUILD_STATUS" = "pass" ] && [ "$TEST_STATUS" = "pass" ] && [ "$CONTRACT_S
       PHASE_COMPLETE="yes"
       ;;
     2)
-      if [ "$HELP_STATUS" = "pass" ] && [ "$JSON_STATUS" = "pass" ] && [ "$EXIT_STATUS" = "pass" ]; then
+      if [ "$P2_WIDGET_COV" = "pass" ]; then
         PHASE_COMPLETE="yes"
       fi
       ;;
