@@ -50,6 +50,106 @@ public enum AXError: Error, CustomStringConvertible {
     }
 }
 
+/// Canonical mapping from AX roles to display types.
+/// Single source of truth — used by displayType and tests.
+public let ROLE_MAP: [String: String] = [
+    // --- Controls ---
+    "AXButton": "button",
+    "AXTextField": "textfield",
+    "AXTextArea": "textfield",
+    "AXCheckBox": "checkbox",
+    "AXRadioButton": "radio",
+    "AXPopUpButton": "dropdown",
+    "AXComboBox": "dropdown",
+    "AXSlider": "slider",
+    "AXSwitch": "switch",
+    "AXToggle": "switch",
+    "AXMenuItem": "menuitem",
+    "AXMenuButton": "menubutton",
+    "AXLink": "link",
+    "AXTab": "tab",
+    "AXTabGroup": "tabgroup",
+    "AXDisclosureTriangle": "disclosure",
+    "AXIncrementor": "stepper",
+    "AXColorWell": "colorwell",
+    "AXSegmentedControl": "segmented",
+
+    "AXSearchField": "searchfield",
+    "AXDateField": "datefield",
+    "AXLevelIndicator": "levelindicator",
+    "AXRadioGroup": "radiogroup",
+    "AXStepper": "stepper",
+
+    // --- Content & Display ---
+    "AXStaticText": "label",
+    "AXImage": "image",
+    "AXHeading": "heading",
+    "AXProgressIndicator": "progressbar",
+    "AXBusyIndicator": "busyindicator",
+    "AXValueIndicator": "valueindicator",
+    "AXRelevanceIndicator": "relevanceindicator",
+    "AXRuler": "ruler",
+    "AXRulerMarker": "rulermarker",
+    "AXMatte": "matte",
+    "AXGrowArea": "growarea",
+
+    // --- Scroll Components ---
+    "AXScrollBar": "scrollbar",
+    "AXHandle": "handle",
+
+    // --- System-Level ---
+    "AXApplication": "application",
+    "AXSystemWide": "system",
+    "AXUnknown": "unknown",
+
+    // --- Web & Misc ---
+    "AXWebArea": "webarea",
+    "AXPopover": "popover",
+    "AXHelpTag": "helptag",
+    "AXTextMarkerRange": "textmarkerrange",
+
+    // --- Containers & Layout ---
+    "AXGroup": "group",
+    "AXWindow": "window",
+    "AXToolbar": "toolbar",
+    "AXScrollArea": "scrollarea",
+    "AXSplitGroup": "splitgroup",
+    "AXSplitter": "splitter",
+    "AXSheet": "sheet",
+    "AXDrawer": "drawer",
+    "AXLayoutArea": "layoutarea",
+    "AXLayoutItem": "layoutitem",
+
+    // --- Table/List Structure ---
+    "AXTable": "table",
+    "AXList": "list",
+    "AXOutline": "outline",
+    "AXBrowser": "browser",
+    "AXRow": "row",
+    "AXColumn": "column",
+    "AXCell": "cell",
+
+    // --- Menus ---
+    "AXMenu": "menu",
+    "AXMenuBar": "menubar",
+    "AXMenuBarItem": "menubaritem",
+    "AXMenuItemCheckbox": "menuitem",
+    "AXMenuItemRadio": "menuitem",
+]
+
+/// Interactive AX roles that agents can interact with.
+/// Used by isInteractive and collectElements — single source of truth.
+public let INTERACTIVE_ROLES: Set<String> = [
+    "AXButton", "AXTextField", "AXTextArea", "AXCheckBox",
+    "AXRadioButton", "AXPopUpButton", "AXComboBox", "AXSlider",
+    "AXSwitch", "AXToggle", "AXMenuItem", "AXMenuButton",
+    "AXLink", "AXTab", "AXTabGroup", "AXDisclosureTriangle",
+    "AXIncrementor", "AXColorWell", "AXSegmentedControl",
+    "AXSearchField", "AXDateField", "AXLevelIndicator",
+    "AXRadioGroup", "AXStepper",
+    "AXMenuBarItem", "AXMenuItemCheckbox", "AXMenuItemRadio",
+]
+
 public struct AXNode {
     public let role: String
     public let subrole: String?
@@ -84,40 +184,11 @@ public struct AXNode {
     }
 
     public var isInteractive: Bool {
-        let interactiveRoles: Set<String> = [
-            "AXButton", "AXTextField", "AXTextArea", "AXCheckBox",
-            "AXRadioButton", "AXPopUpButton", "AXComboBox", "AXSlider",
-            "AXSwitch", "AXToggle", "AXMenuItem", "AXMenuButton",
-            "AXLink", "AXTab", "AXTabGroup", "AXDisclosureTriangle",
-            "AXIncrementor", "AXColorWell", "AXSegmentedControl"
-        ]
-        return interactiveRoles.contains(role) || actions.contains("AXPress") || actions.contains("AXConfirm")
+        return INTERACTIVE_ROLES.contains(role) || actions.contains("AXPress") || actions.contains("AXConfirm")
     }
 
     public var displayType: String {
-        switch role {
-        case "AXButton": return "button"
-        case "AXTextField", "AXTextArea": return "textfield"
-        case "AXStaticText": return "statictext"
-        case "AXCheckBox": return "checkbox"
-        case "AXRadioButton": return "radio"
-        case "AXPopUpButton", "AXComboBox": return "dropdown"
-        case "AXSlider": return "slider"
-        case "AXSwitch", "AXToggle": return "switch"
-        case "AXMenuItem": return "menuitem"
-        case "AXLink": return "link"
-        case "AXImage": return "image"
-        case "AXTab": return "tab"
-        case "AXTable": return "table"
-        case "AXList": return "list"
-        case "AXGroup": return "group"
-        case "AXWindow": return "window"
-        case "AXToolbar": return "toolbar"
-        case "AXScrollArea": return "scrollarea"
-        case "AXMenu": return "menu"
-        case "AXMenuBar": return "menubar"
-        default: return role.replacingOccurrences(of: "AX", with: "").lowercased()
-        }
+        return ROLE_MAP[role] ?? role.replacingOccurrences(of: "AX", with: "").lowercased()
     }
 
     public var displayLabel: String? {
@@ -273,14 +344,7 @@ public class AXClient {
             return (a as? [String]) ?? []
         }()
 
-        let interactiveRoles: Set<String> = [
-            "AXButton", "AXTextField", "AXTextArea", "AXCheckBox",
-            "AXRadioButton", "AXPopUpButton", "AXComboBox", "AXSlider",
-            "AXSwitch", "AXToggle", "AXMenuItem", "AXMenuButton",
-            "AXLink", "AXTab", "AXTabGroup", "AXDisclosureTriangle",
-            "AXIncrementor", "AXColorWell", "AXSegmentedControl"
-        ]
-        let isInteractive = interactiveRoles.contains(role) || actions.contains("AXPress") || actions.contains("AXConfirm")
+        let isInteractive = INTERACTIVE_ROLES.contains(role) || actions.contains("AXPress") || actions.contains("AXConfirm")
 
         if !interactiveOnly || isInteractive {
             result.append(element)
