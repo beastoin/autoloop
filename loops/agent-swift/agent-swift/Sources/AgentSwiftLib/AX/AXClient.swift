@@ -332,6 +332,31 @@ public class AXClient {
         return AXUIElementPerformAction(element, actionName as CFString) == .success
     }
 
+    public static func performFill(element: AXUIElement, text: String) -> Bool {
+        AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, true as CFTypeRef)
+        return AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, text as CFTypeRef) == .success
+    }
+
+    public static func captureScreenshot(pid: Int, path: String) -> Bool {
+        guard let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
+            return false
+        }
+        let appWindows = windowList.filter { ($0[kCGWindowOwnerPID as String] as? Int) == pid }
+        guard let firstWindow = appWindows.first,
+              let windowID = firstWindow[kCGWindowNumber as String] as? CGWindowID else {
+            return false
+        }
+        guard let image = CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, [.boundsIgnoreFraming]) else {
+            return false
+        }
+        let url = URL(fileURLWithPath: path)
+        guard let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) else {
+            return false
+        }
+        CGImageDestinationAddImage(dest, image, nil)
+        return CGImageDestinationFinalize(dest)
+    }
+
     public static func collectElements(element: AXUIElement, interactiveOnly: Bool, into result: inout [AXUIElement], maxDepth: Int = 20, depth: Int = 0) {
         let role: String = {
             var v: AnyObject?
