@@ -14,7 +14,8 @@ Autonomous loop system for building agent-grade CLIs from objectives.
 ```text
 .
 ├── loops/                              # one directory per build loop
-│   └── agent-flutter/                  # loop 1: Flutter testing CLI
+│   ├── agent-flutter/                  # loop 1: Flutter testing CLI
+│   └── agent-swift/                    # loop 2: macOS Accessibility CLI
 │       ├── program*.md                 # phase instructions
 │       ├── eval.sh                     # phase evaluator (immutable)
 │       ├── e2e-test.ts                 # e2e test suite (immutable)
@@ -49,6 +50,7 @@ Loop: read program → implement → run eval → pass: keep, fail: revert → r
 | Loop | Build target | Product repo | Status |
 |------|-------------|--------------|--------|
 | `loops/agent-flutter/` | Flutter testing CLI | [beastoin/agent-flutter](https://github.com/beastoin/agent-flutter) | Phase 5 complete |
+| `loops/agent-swift/` | macOS Accessibility CLI | [beastoin/agent-swift](https://github.com/beastoin/agent-swift) | Phase 7 complete (v0.2.1) |
 
 ## Publish flow
 
@@ -80,5 +82,6 @@ Reference implementation: `loops/agent-flutter/`
 ## Related
 
 - [beastoin/agent-flutter](https://github.com/beastoin/agent-flutter) — standalone agent-flutter CLI (product)
+- [beastoin/agent-swift](https://github.com/beastoin/agent-swift) — standalone agent-swift CLI (product)
 - [callstackincubator/agent-device](https://github.com/callstackincubator/agent-device) — design reference (mobile)
 - [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser) — design reference (web)
