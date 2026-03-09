@@ -15,7 +15,9 @@ struct AgentSwift: ParsableCommand {
             DisconnectCommand.self,
             StatusCommand.self,
             SnapshotCommand.self,
-            PressCommand.self
+            PressCommand.self,
+            FillCommand.self,
+            ScreenshotCommand.self
         ]
     )
 
@@ -277,6 +279,7 @@ struct SnapshotCommand: ParsableCommand {
 
         session.refs = refs
         session.lastSnapshotAt = ISO8601DateFormatter().string(from: Date())
+        session.interactiveSnapshot = interactive
         try store.save(session)
 
         if globals.json {
@@ -328,10 +331,7 @@ struct PressCommand: ParsableCommand {
         let index = Int(String(refKey.dropFirst()))! - 1
 
         let root = AXClient.appElement(pid: pid)
-        let tree = AXClient.walkTree(element: root)
-        let allNodes = AXClient.flattenTree(tree)
-        let interactiveNodes = allNodes.filter { $0.isInteractive }
-        let useInteractive = session.refs.count == interactiveNodes.count && session.refs.count != allNodes.count
+        let useInteractive = session.interactiveSnapshot ?? false
 
         var elements: [AXUIElement] = []
         AXClient.collectElements(element: root, interactiveOnly: useInteractive, into: &elements)
@@ -357,6 +357,126 @@ struct PressCommand: ParsableCommand {
         } else {
             Output.printError(code: "ACTION_NOT_SUPPORTED", message: "Cannot press \(ref)",
                             hint: "Pick a different target from snapshot", useJson: globals.json)
+            throw ExitCode(2)
+        }
+    }
+}
+
+// MARK: - Fill
+
+struct FillCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "fill", abstract: "Enter text into element by ref")
+
+    @OptionGroup var globals: GlobalOptions
+
+    @Argument(help: "Element ref (e.g. @e1)")
+    var ref: String
+
+    @Argument(help: "Text to enter")
+    var text: String
+
+    struct FillResult: Codable {
+        let filled: String
+        let text: String
+        let success: Bool
+    }
+
+    func run() throws {
+        let store = SessionStore()
+        let session = store.load()
+
+        guard session.isConnected, let pid = session.pid else {
+            Output.printError(code: "NOT_CONNECTED", message: "No active session",
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.json)
+            throw ExitCode(2)
+        }
+
+        let refKey = ref.hasPrefix("@") ? String(ref.dropFirst()) : ref
+        guard session.refs[refKey] != nil else {
+            Output.printError(code: "ELEMENT_NOT_FOUND", message: "Element not found: \(ref)",
+                            hint: "Re-run: agent-swift snapshot -i", useJson: globals.json)
+            throw ExitCode(2)
+        }
+
+        guard let _ = Int(String(refKey.dropFirst())) else {
+            Output.printError(code: "INVALID_INPUT", message: "Invalid ref format: \(ref)",
+                            hint: "Use @eN format (e.g. @e1)", useJson: globals.json)
+            throw ExitCode(2)
+        }
+        let index = Int(String(refKey.dropFirst()))! - 1
+
+        let root = AXClient.appElement(pid: pid)
+        let useInteractive = session.interactiveSnapshot ?? false
+
+        var elements: [AXUIElement] = []
+        AXClient.collectElements(element: root, interactiveOnly: useInteractive, into: &elements)
+
+        guard index >= 0 && index < elements.count else {
+            Output.printError(code: "ELEMENT_NOT_FOUND", message: "Element \(ref) no longer exists (stale ref)",
+                            hint: "Re-run: agent-swift snapshot -i", useJson: globals.json)
+            throw ExitCode(2)
+        }
+
+        let target = elements[index]
+        let success = AXClient.performFill(element: target, text: text)
+
+        if success {
+            if globals.json {
+                print(Output.json(FillResult(filled: ref, text: text, success: true)))
+            } else {
+                print("Filled \(ref) with \"\(text)\"")
+            }
+        } else {
+            Output.printError(code: "ACTION_NOT_SUPPORTED", message: "Cannot fill \(ref)",
+                            hint: "Element may not accept text input. Use a textfield or textarea.", useJson: globals.json)
+            throw ExitCode(2)
+        }
+    }
+}
+
+// MARK: - Screenshot
+
+struct ScreenshotCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "screenshot", abstract: "Capture app screenshot")
+
+    @OptionGroup var globals: GlobalOptions
+
+    @Argument(help: "Output file path (default: /tmp/agent-swift-screenshot.png)")
+    var path: String?
+
+    struct ScreenshotResult: Codable {
+        let path: String
+        let success: Bool
+    }
+
+    func run() throws {
+        let store = SessionStore()
+        let session = store.load()
+
+        guard session.isConnected, let pid = session.pid else {
+            Output.printError(code: "NOT_CONNECTED", message: "No active session",
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.json)
+            throw ExitCode(2)
+        }
+
+        guard AXClient.isProcessRunning(pid: pid) else {
+            Output.printError(code: "APP_NOT_RUNNING", message: "Target app (PID \(pid)) is no longer running",
+                            hint: "Reconnect with: agent-swift connect", useJson: globals.json)
+            throw ExitCode(2)
+        }
+
+        let outputPath = path ?? "/tmp/agent-swift-screenshot.png"
+        let success = AXClient.captureScreenshot(pid: pid, path: outputPath)
+
+        if success {
+            if globals.json {
+                print(Output.json(ScreenshotResult(path: outputPath, success: true)))
+            } else {
+                print("Screenshot saved to \(outputPath)")
+            }
+        } else {
+            Output.printError(code: "SCREENSHOT_FAILED", message: "Failed to capture screenshot",
+                            hint: "Ensure the app window is visible on screen", useJson: globals.json)
             throw ExitCode(2)
         }
     }

@@ -6,6 +6,7 @@ public struct SessionData: Codable {
     public var connectedAt: String?
     public var refs: [String: RefEntry]
     public var lastSnapshotAt: String?
+    public var interactiveSnapshot: Bool?
 
     public struct RefEntry: Codable {
         public let role: String
@@ -40,7 +41,7 @@ public struct SessionData: Codable {
     }
 
     public static var empty: SessionData {
-        return SessionData(pid: nil, bundleId: nil, connectedAt: nil, refs: [:], lastSnapshotAt: nil)
+        return SessionData(pid: nil, bundleId: nil, connectedAt: nil, refs: [:], lastSnapshotAt: nil, interactiveSnapshot: nil)
     }
 }
 
