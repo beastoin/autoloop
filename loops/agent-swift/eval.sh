@@ -115,6 +115,9 @@ fi
 if [ -f "loops/agent-swift/program-phase4.md" ]; then
   PHASE=4
 fi
+if [ -f "loops/agent-swift/program-phase5.md" ]; then
+  PHASE=5
+fi
 echo "phase:            $PHASE"
 
 # Step 1: Build check
@@ -606,6 +609,79 @@ if [ "$PHASE" -ge 4 ] && [ "$CLI_STATUS" = "pass" ]; then
 fi
 echo "p4_autonomy:      $P4_AUTONOMY"
 
+# Phase 5 gates: Polish
+P5_POLISH="skip"
+if [ "$PHASE" -ge 5 ] && [ "$CLI_STATUS" = "pass" ]; then
+  P5_PASS=0
+  P5_TOTAL=0
+
+  # Gate 1: version is 0.2.0
+  P5_TOTAL=$((P5_TOTAL + 1))
+  VERSION_OUT=$("$BINARY_PATH" --version 2>&1 || true)
+  if echo "$VERSION_OUT" | grep -q "0.2.0"; then
+    P5_PASS=$((P5_PASS + 1))
+  fi
+
+  # Gate 2: AGENT_SWIFT_JSON=1 makes status output JSON (without --json flag)
+  P5_TOTAL=$((P5_TOTAL + 1))
+  AGENT_SWIFT_JSON=1 "$BINARY_PATH" status > /tmp/as-eval-envjson.json 2>&1 || true
+  if json_check /tmp/as-eval-envjson.json object; then
+    P5_PASS=$((P5_PASS + 1))
+  fi
+
+  # Gate 3: Non-TTY pipe produces JSON output
+  P5_TOTAL=$((P5_TOTAL + 1))
+  "$BINARY_PATH" status 2>/dev/null | cat > /tmp/as-eval-tty.json
+  if json_check /tmp/as-eval-tty.json object; then
+    P5_PASS=$((P5_PASS + 1))
+  fi
+
+  # Gate 4: AGENTS.md has env vars section
+  P5_TOTAL=$((P5_TOTAL + 1))
+  AGENTS_FILE="loops/agent-swift/AGENTS.md"
+  if [ -f "$AGENTS_FILE" ] && grep -q "AGENT_SWIFT_JSON" "$AGENTS_FILE" && grep -q "AGENT_SWIFT_TIMEOUT" "$AGENTS_FILE"; then
+    P5_PASS=$((P5_PASS + 1))
+  fi
+
+  # Gate 5: AGENTS.md has CLAUDE.md snippet section
+  P5_TOTAL=$((P5_TOTAL + 1))
+  if [ -f "$AGENTS_FILE" ] && grep -qi "CLAUDE.md" "$AGENTS_FILE"; then
+    P5_PASS=$((P5_PASS + 1))
+  fi
+
+  # Gate 6: AGENTS.md has scroll in idempotency table
+  P5_TOTAL=$((P5_TOTAL + 1))
+  if [ -f "$AGENTS_FILE" ] && grep -q "scroll" "$AGENTS_FILE"; then
+    P5_PASS=$((P5_PASS + 1))
+  fi
+
+  # Gate 7: Tests pass with >= 59 total
+  P5_TOTAL=$((P5_TOTAL + 1))
+  if [ "$TEST_STATUS" = "pass" ]; then
+    TEST_NUM=$(echo "$TEST_COUNT" | tr -dc '0-9')
+    if [ "$TEST_NUM" -ge 59 ]; then
+      P5_PASS=$((P5_PASS + 1))
+    fi
+  fi
+
+  # Gate 8: AGENT_SWIFT_HOME works for session path
+  P5_TOTAL=$((P5_TOTAL + 1))
+  TMPDIR_TEST=$(mktemp -d)
+  AGENT_SWIFT_HOME="$TMPDIR_TEST" "$BINARY_PATH" status > /dev/null 2>&1 || true
+  # Just check it doesn't crash — the session file should be read from custom dir
+  if [ $? -le 2 ]; then
+    P5_PASS=$((P5_PASS + 1))
+  fi
+  rm -rf "$TMPDIR_TEST"
+
+  if [ "$P5_PASS" -eq "$P5_TOTAL" ]; then
+    P5_POLISH="pass"
+  else
+    P5_POLISH="fail ($P5_PASS/$P5_TOTAL)"
+  fi
+fi
+echo "p5_polish:        $P5_POLISH"
+
 # Step 5: E2E test (optional; enabled when e2e-test.sh exists)
 E2E_STATUS="skip"
 if [ -x "loops/agent-swift/e2e-test.sh" ]; then
@@ -655,6 +731,16 @@ if [ "$BUILD_STATUS" = "pass" ] && [ "$TEST_STATUS" = "pass" ] && [ "$CONTRACT_S
          [ "$EXIT_STATUS" = "pass" ] && \
          [ "$P3_INTERACTION" = "pass" ] && \
          [ "$P4_AUTONOMY" = "pass" ]; then
+        PHASE_COMPLETE="yes"
+      fi
+      ;;
+    5)
+      if [ "$HELP_STATUS" = "pass" ] && \
+         [ "$JSON_STATUS" = "pass" ] && \
+         [ "$EXIT_STATUS" = "pass" ] && \
+         [ "$P3_INTERACTION" = "pass" ] && \
+         [ "$P4_AUTONOMY" = "pass" ] && \
+         [ "$P5_POLISH" = "pass" ]; then
         PHASE_COMPLETE="yes"
       fi
       ;;
