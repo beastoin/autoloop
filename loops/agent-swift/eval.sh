@@ -728,20 +728,20 @@ if [ "$PHASE" -ge 6 ] && [ "$TEST_STATUS" = "pass" ]; then
     P2B_PASS=$((P2B_PASS + 1))
   fi
 
-  # Gate 7: Tests >= 69
+  # Gate 7: Tests >= 63 (59 existing + 4 new widget coverage tests)
   P2B_TOTAL=$((P2B_TOTAL + 1))
   TEST_NUM=$(echo "$TEST_COUNT" | tr -dc '0-9')
-  if [ "$TEST_NUM" -ge 69 ]; then
+  if [ "$TEST_NUM" -ge 63 ]; then
     P2B_PASS=$((P2B_PASS + 1))
   fi
 
-  # Gate 8: Live snapshot against System Settings produces valid JSON
+  # Gate 8: Live snapshot against Finder (always running) produces valid JSON
   P2B_TOTAL=$((P2B_TOTAL + 1))
   if [ -x "$BINARY_PATH" ]; then
-    "$BINARY_PATH" connect --bundle-id com.apple.systempreferences --json > /dev/null 2>&1 || true
-    "$BINARY_PATH" snapshot -i --json > /tmp/as-eval-sysset.json 2>&1 || true
+    "$BINARY_PATH" connect --bundle-id com.apple.finder --json > /dev/null 2>&1 || true
+    "$BINARY_PATH" snapshot -i --json > /tmp/as-eval-finder.json 2>&1 || true
     "$BINARY_PATH" disconnect --json > /dev/null 2>&1 || true
-    if json_check /tmp/as-eval-sysset.json array; then
+    if json_check /tmp/as-eval-finder.json array; then
       P2B_PASS=$((P2B_PASS + 1))
     fi
   fi

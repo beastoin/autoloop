@@ -76,6 +76,8 @@ public let ROLE_MAP: [String: String] = [
 
     "AXSearchField": "searchfield",
     "AXDateField": "datefield",
+    "AXTimeField": "timefield",
+    "AXDateTimeArea": "datetimearea",
     "AXLevelIndicator": "levelindicator",
     "AXRadioGroup": "radiogroup",
     "AXStepper": "stepper",
@@ -92,6 +94,7 @@ public let ROLE_MAP: [String: String] = [
     "AXRulerMarker": "rulermarker",
     "AXMatte": "matte",
     "AXGrowArea": "growarea",
+    "AXListMarker": "listmarker",
 
     // --- Scroll Components ---
     "AXScrollBar": "scrollbar",
@@ -101,6 +104,7 @@ public let ROLE_MAP: [String: String] = [
     "AXApplication": "application",
     "AXSystemWide": "system",
     "AXUnknown": "unknown",
+    "AXDockItem": "dockitem",
 
     // --- Web & Misc ---
     "AXWebArea": "webarea",
@@ -119,6 +123,8 @@ public let ROLE_MAP: [String: String] = [
     "AXDrawer": "drawer",
     "AXLayoutArea": "layoutarea",
     "AXLayoutItem": "layoutitem",
+    "AXGrid": "grid",
+    "AXPage": "page",
 
     // --- Table/List Structure ---
     "AXTable": "table",
@@ -145,8 +151,8 @@ public let INTERACTIVE_ROLES: Set<String> = [
     "AXSwitch", "AXToggle", "AXMenuItem", "AXMenuButton",
     "AXLink", "AXTab", "AXTabGroup", "AXDisclosureTriangle",
     "AXIncrementor", "AXColorWell", "AXSegmentedControl",
-    "AXSearchField", "AXDateField", "AXLevelIndicator",
-    "AXRadioGroup", "AXStepper",
+    "AXSearchField", "AXDateField", "AXTimeField", "AXLevelIndicator",
+    "AXRadioGroup", "AXStepper", "AXDockItem",
     "AXMenuBarItem", "AXMenuItemCheckbox", "AXMenuItemRadio",
 ]
 
