@@ -141,9 +141,9 @@ if [ -f "$AGENT_SWIFT_DIR/Package.swift" ]; then
 fi
 echo "tests:            $TEST_STATUS ($TEST_COUNT)"
 
-# Step 2b: Contract test target (optional, phase 3+)
+# Step 2b: Contract test target (optional, phase 4+)
 CONTRACT_TEST_STATUS="skip"
-if [ "$PHASE" -ge 3 ]; then
+if [ "$PHASE" -ge 4 ]; then
   if [ -f "$AGENT_SWIFT_DIR/Package.swift" ]; then
     if (cd "$AGENT_SWIFT_DIR" && swift test --filter ContractTests > /tmp/as-eval-contract-tests.log 2>&1); then
       CONTRACT_TEST_STATUS="pass"
@@ -155,6 +155,21 @@ if [ "$PHASE" -ge 3 ]; then
   fi
 fi
 echo "contract_tests:   $CONTRACT_TEST_STATUS"
+
+# Step 2c: Interaction test target (phase 3+)
+INTERACTION_TEST_STATUS="skip"
+if [ "$PHASE" -ge 3 ]; then
+  if [ -f "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/InteractionTests.swift" ]; then
+    if (cd "$AGENT_SWIFT_DIR" && swift test --filter InteractionTests > /tmp/as-eval-interaction-tests.log 2>&1); then
+      INTERACTION_TEST_STATUS="pass"
+    else
+      INTERACTION_TEST_STATUS="fail"
+    fi
+  else
+    INTERACTION_TEST_STATUS="missing"
+  fi
+fi
+echo "interaction_tests: $INTERACTION_TEST_STATUS"
 
 # Step 3: CLI smoke
 CLI_STATUS="skip"
@@ -192,8 +207,16 @@ if [ "$CLI_STATUS" = "pass" ]; then
       HELP_PASS=$((HELP_PASS + 1))
     fi
   done
-  if [ "$PHASE" -ge 2 ]; then
-    for CMD in fill get find wait is screenshot schema; do
+  if [ "$PHASE" -ge 3 ]; then
+    for CMD in fill get find screenshot; do
+      HELP_TOTAL=$((HELP_TOTAL + 1))
+      if command_exists_in_help "$CMD"; then
+        HELP_PASS=$((HELP_PASS + 1))
+      fi
+    done
+  fi
+  if [ "$PHASE" -ge 4 ]; then
+    for CMD in wait is schema; do
       HELP_TOTAL=$((HELP_TOTAL + 1))
       if command_exists_in_help "$CMD"; then
         HELP_PASS=$((HELP_PASS + 1))
@@ -217,8 +240,16 @@ if [ "$CLI_STATUS" = "pass" ]; then
       PCH_PASS=$((PCH_PASS + 1))
     fi
   done
-  if [ "$PHASE" -ge 2 ]; then
-    for CMD in fill get find wait is screenshot schema; do
+  if [ "$PHASE" -ge 3 ]; then
+    for CMD in fill get find screenshot; do
+      PCH_TOTAL=$((PCH_TOTAL + 1))
+      if "$BINARY_PATH" "$CMD" --help > /dev/null 2>&1; then
+        PCH_PASS=$((PCH_PASS + 1))
+      fi
+    done
+  fi
+  if [ "$PHASE" -ge 4 ]; then
+    for CMD in wait is schema; do
       PCH_TOTAL=$((PCH_TOTAL + 1))
       if "$BINARY_PATH" "$CMD" --help > /dev/null 2>&1; then
         PCH_PASS=$((PCH_PASS + 1))
@@ -252,7 +283,30 @@ if [ "$CLI_STATUS" = "pass" ]; then
     J_PASS=$((J_PASS + 1))
   fi
 
-  if [ "$PHASE" -ge 2 ]; then
+  if [ "$PHASE" -ge 3 ]; then
+    # fill --json returns valid JSON
+    J_TOTAL=$((J_TOTAL + 1))
+    "$BINARY_PATH" fill @e999 "test" --json > /tmp/as-eval-fill.json 2>&1 || true
+    if json_check /tmp/as-eval-fill.json json; then
+      J_PASS=$((J_PASS + 1))
+    fi
+
+    # get attrs --json returns valid JSON
+    J_TOTAL=$((J_TOTAL + 1))
+    "$BINARY_PATH" get attrs @e999 --json > /tmp/as-eval-get.json 2>&1 || true
+    if json_check /tmp/as-eval-get.json json; then
+      J_PASS=$((J_PASS + 1))
+    fi
+
+    # screenshot --json returns valid JSON
+    J_TOTAL=$((J_TOTAL + 1))
+    "$BINARY_PATH" screenshot --json > /tmp/as-eval-screenshot.json 2>&1 || true
+    if json_check /tmp/as-eval-screenshot.json json; then
+      J_PASS=$((J_PASS + 1))
+    fi
+  fi
+
+  if [ "$PHASE" -ge 4 ]; then
     J_TOTAL=$((J_TOTAL + 1))
     "$BINARY_PATH" schema > /tmp/as-eval-schema.json 2>&1 || true
     if json_check /tmp/as-eval-schema.json schema-full; then
@@ -297,7 +351,25 @@ if [ "$CLI_STATUS" = "pass" ]; then
     E_PASS=$((E_PASS + 1))
   fi
 
-  if [ "$PHASE" -ge 2 ]; then
+  if [ "$PHASE" -ge 3 ]; then
+    # fill on invalid ref should exit 2
+    E_TOTAL=$((E_TOTAL + 1))
+    "$BINARY_PATH" fill @e999999 "test" > /dev/null 2>&1
+    FILL_EC=$?
+    if [ "$FILL_EC" -eq 2 ]; then
+      E_PASS=$((E_PASS + 1))
+    fi
+
+    # get on invalid ref should exit 2
+    E_TOTAL=$((E_TOTAL + 1))
+    "$BINARY_PATH" get text @e999999 > /dev/null 2>&1
+    GET_EC=$?
+    if [ "$GET_EC" -eq 2 ]; then
+      E_PASS=$((E_PASS + 1))
+    fi
+  fi
+
+  if [ "$PHASE" -ge 4 ]; then
     E_TOTAL=$((E_TOTAL + 1))
     "$BINARY_PATH" is exists @e999999 > /dev/null 2>&1
     IS_EC=$?
@@ -374,6 +446,81 @@ if [ "$PHASE" -ge 2 ] && [ -f "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/WidgetCov
 fi
 echo "p2_widget_cov:    $P2_WIDGET_COV"
 
+# Step 4c: Phase 3 interaction gates
+P3_INTERACTION="skip"
+if [ "$PHASE" -ge 3 ] && [ "$CLI_STATUS" = "pass" ]; then
+  P3_PASS=0
+  P3_TOTAL=0
+
+  # Gate 1: fill command exists in help
+  P3_TOTAL=$((P3_TOTAL + 1))
+  if command_exists_in_help "fill"; then
+    P3_PASS=$((P3_PASS + 1))
+  fi
+
+  # Gate 2: get command exists in help
+  P3_TOTAL=$((P3_TOTAL + 1))
+  if command_exists_in_help "get"; then
+    P3_PASS=$((P3_PASS + 1))
+  fi
+
+  # Gate 3: find command exists in help
+  P3_TOTAL=$((P3_TOTAL + 1))
+  if command_exists_in_help "find"; then
+    P3_PASS=$((P3_PASS + 1))
+  fi
+
+  # Gate 4: screenshot command exists in help
+  P3_TOTAL=$((P3_TOTAL + 1))
+  if command_exists_in_help "screenshot"; then
+    P3_PASS=$((P3_PASS + 1))
+  fi
+
+  # Gate 5: interactiveSnapshot field in SessionStore.swift
+  P3_TOTAL=$((P3_TOTAL + 1))
+  if grep -q "interactiveSnapshot" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Session/SessionStore.swift" 2>/dev/null; then
+    P3_PASS=$((P3_PASS + 1))
+  fi
+
+  # Gate 6: performFill in AXClient.swift
+  P3_TOTAL=$((P3_TOTAL + 1))
+  if grep -q "performFill" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/AX/AXClient.swift" 2>/dev/null; then
+    P3_PASS=$((P3_PASS + 1))
+  fi
+
+  # Gate 7: captureScreenshot in AXClient.swift
+  P3_TOTAL=$((P3_TOTAL + 1))
+  if grep -q "captureScreenshot" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/AX/AXClient.swift" 2>/dev/null; then
+    P3_PASS=$((P3_PASS + 1))
+  fi
+
+  # Gate 8: InteractionTests.swift exists
+  P3_TOTAL=$((P3_TOTAL + 1))
+  if [ -f "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/InteractionTests.swift" ]; then
+    P3_PASS=$((P3_PASS + 1))
+  fi
+
+  # Gate 9: >= 20 XCTAssert calls in interaction tests
+  P3_TOTAL=$((P3_TOTAL + 1))
+  IC_ASSERTIONS=$(grep -cE "XCTAssert" "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/InteractionTests.swift" 2>/dev/null || echo "0")
+  if [ "$IC_ASSERTIONS" -ge 20 ]; then
+    P3_PASS=$((P3_PASS + 1))
+  fi
+
+  # Gate 10: Interaction tests pass
+  P3_TOTAL=$((P3_TOTAL + 1))
+  if [ "$INTERACTION_TEST_STATUS" = "pass" ]; then
+    P3_PASS=$((P3_PASS + 1))
+  fi
+
+  if [ "$P3_PASS" -eq "$P3_TOTAL" ]; then
+    P3_INTERACTION="pass"
+  else
+    P3_INTERACTION="fail ($P3_PASS/$P3_TOTAL)"
+  fi
+fi
+echo "p3_interaction:   $P3_INTERACTION"
+
 # Step 5: E2E test (optional; enabled when e2e-test.sh exists)
 E2E_STATUS="skip"
 if [ -x "loops/agent-swift/e2e-test.sh" ]; then
@@ -413,7 +560,7 @@ if [ "$BUILD_STATUS" = "pass" ] && [ "$TEST_STATUS" = "pass" ] && [ "$CONTRACT_S
       if [ "$HELP_STATUS" = "pass" ] && \
          [ "$JSON_STATUS" = "pass" ] && \
          [ "$EXIT_STATUS" = "pass" ] && \
-         [ "$CONTRACT_TEST_STATUS" = "pass" ]; then
+         [ "$P3_INTERACTION" = "pass" ]; then
         PHASE_COMPLETE="yes"
       fi
       ;;
