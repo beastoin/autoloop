@@ -331,10 +331,16 @@ if [ "$PHASE" -ge 6 ] && [ "$CLI_STATUS" = "pass" ] && [ "${#CLI_CMD[@]}" -gt 0 
       'Text','RichText','Image','Icon','Container','Column','Row','Stack','Scaffold',
       'ListView','GridView','PageView','ReorderableListView','RefreshIndicator'
     ];
+    const knownTypes = new Set([
+      'button','textfield','searchbar','switch','checkbox','radio','slider',
+      'chip','dropdown','menu','picker','dialog','banner','snackbar','tooltip',
+      'appbar','navbar','drawer','tabbar','tab','tile','card','table','stepper','panel',
+      'gesture','label','image','icon','container','column','row','stack','scaffold',
+      'list','grid','pageview','refresh','segmented'
+    ]);
     let mapped = 0;
     for (const w of widgets) {
-      const t = normalizeType(w);
-      if (t !== w.toLowerCase()) mapped++;
+      if (knownTypes.has(normalizeType(w))) mapped++;
     }
     console.log(mapped);
   " 2>/dev/null || echo "0")
