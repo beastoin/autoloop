@@ -105,6 +105,9 @@ fi
 if [ -f "$AGENT_FLUTTER_DIR/src/command-schema.ts" ]; then
   PHASE=5
 fi
+if [ -f "loops/agent-flutter/program-phase6.md" ] && [ -f "$AGENT_FLUTTER_DIR/__tests__/widget-coverage.test.ts" ]; then
+  PHASE=6
+fi
 echo "phase:            $PHASE"
 
 # Step 1: Build check (TypeScript compiles)
@@ -282,6 +285,84 @@ if [ "$PHASE" -ge 5 ] && [ "$CLI_STATUS" = "pass" ] && [ "${#CLI_CMD[@]}" -gt 0 
 fi
 echo "p5_checks:        $P5_STATUS"
 
+# Step 3d: Phase 6 widget coverage checks
+P6_STATUS="skip"
+if [ "$PHASE" -ge 6 ] && [ "$CLI_STATUS" = "pass" ] && [ "${#CLI_CMD[@]}" -gt 0 ]; then
+  P6_PASS=0
+  P6_TOTAL=0
+
+  # Widget coverage test file exists
+  P6_TOTAL=$((P6_TOTAL + 1))
+  if [ -f "$AGENT_FLUTTER_DIR/__tests__/widget-coverage.test.ts" ]; then
+    P6_PASS=$((P6_PASS + 1))
+  fi
+
+  # Widget coverage tests pass
+  P6_TOTAL=$((P6_TOTAL + 1))
+  if node --test "$AGENT_FLUTTER_DIR/__tests__/widget-coverage.test.ts" > /tmp/af-eval-widget-cov.log 2>&1; then
+    P6_PASS=$((P6_PASS + 1))
+  fi
+
+  # TYPE_MAP has >= 85 entries (check via node inline)
+  P6_TOTAL=$((P6_TOTAL + 1))
+  TYPE_MAP_COUNT=$(node --experimental-strip-types -e "
+    import { normalizeType } from './$AGENT_FLUTTER_DIR/src/snapshot-fmt.ts';
+    // Count by testing known widgets
+    const widgets = [
+      'ElevatedButton','FilledButton','OutlinedButton','TextButton','IconButton','FloatingActionButton',
+      'SegmentedButton','MaterialButton','InkResponse',
+      'TextField','TextFormField','SearchBar','SearchAnchor',
+      'Switch','SwitchListTile','Checkbox','CheckboxListTile','Radio','RadioListTile','Slider','RangeSlider',
+      'Chip','ActionChip','ChoiceChip','FilterChip','InputChip',
+      'DropdownButton','DropdownButtonFormField','DropdownMenu','MenuAnchor','PopupMenuButton',
+      'DatePickerDialog','TimePickerDialog',
+      'AlertDialog','SimpleDialog','BottomSheet','MaterialBanner',
+      'NavigationBar','NavigationRail','NavigationDrawer','Drawer','SliverAppBar','BottomAppBar',
+      'AppBar','BottomNavigationBar','TabBar','Tab',
+      'ExpansionTile','DataTable','Stepper','ExpansionPanelList',
+      'ListTile','Card','SnackBar','Tooltip',
+      'CupertinoButton','CupertinoSwitch','CupertinoSlider','CupertinoCheckbox','CupertinoRadio',
+      'CupertinoTextField','CupertinoSearchTextField','CupertinoTextFormFieldRow',
+      'CupertinoSegmentedControl','CupertinoSlidingSegmentedControl',
+      'CupertinoPicker','CupertinoDatePicker','CupertinoTimerPicker',
+      'CupertinoAlertDialog','CupertinoActionSheet','CupertinoContextMenu',
+      'CupertinoNavigationBar','CupertinoTabBar','CupertinoListTile',
+      'GestureDetector','InkWell','Dismissible','Draggable','LongPressDraggable',
+      'Text','RichText','Image','Icon','Container','Column','Row','Stack','Scaffold',
+      'ListView','GridView','PageView','ReorderableListView','RefreshIndicator'
+    ];
+    let mapped = 0;
+    for (const w of widgets) {
+      const t = normalizeType(w);
+      if (t !== w.toLowerCase()) mapped++;
+    }
+    console.log(mapped);
+  " 2>/dev/null || echo "0")
+  if [ "$TYPE_MAP_COUNT" -ge 85 ]; then
+    P6_PASS=$((P6_PASS + 1))
+  fi
+
+  # WIDGET_SUPPORT.md exists
+  P6_TOTAL=$((P6_TOTAL + 1))
+  if [ -f "$AGENT_FLUTTER_DIR/WIDGET_SUPPORT.md" ]; then
+    P6_PASS=$((P6_PASS + 1))
+  fi
+
+  # Widget coverage tests have >= 50 assertions
+  P6_TOTAL=$((P6_TOTAL + 1))
+  WC_ASSERTIONS=$(grep -cE "assert|strictEqual|deepEqual|ok\(|throws" "$AGENT_FLUTTER_DIR/__tests__/widget-coverage.test.ts" 2>/dev/null || echo "0")
+  if [ "$WC_ASSERTIONS" -ge 50 ]; then
+    P6_PASS=$((P6_PASS + 1))
+  fi
+
+  if [ "$P6_PASS" -eq "$P6_TOTAL" ]; then
+    P6_STATUS="pass"
+  else
+    P6_STATUS="fail ($P6_PASS/$P6_TOTAL)"
+  fi
+fi
+echo "p6_widget_cov:    $P6_STATUS"
+
 # Step 4: E2E test (connect to real Flutter app if available)
 E2E_STATUS="skip"
 E2E_COUNT="0"
@@ -421,6 +502,15 @@ if [ "$BUILD_STATUS" = "pass" ] && [ "$TEST_STATUS" = "pass" ]; then
          [ "$P5_STATUS" = "pass" ] && \
          [ "$EXIT_CODE_STATUS" = "pass" ] && \
          [ "$FMT_STATUS" = "pass" ]; then
+        PHASE_COMPLETE="yes"
+      fi
+      ;;
+    6)
+      if [ "$P5_STATUS" = "pass" ] && \
+         [ "$P6_STATUS" = "pass" ] && \
+         [ "$CONTRACT_STATUS" = "pass" ] && \
+         [ "$P4_CLI_STATUS" = "pass" ] && \
+         [ "$EXIT_CODE_STATUS" = "pass" ]; then
         PHASE_COMPLETE="yes"
       fi
       ;;
