@@ -251,6 +251,61 @@ agent-flutter --no-json snapshot | head
 
 Precedence: CLI flag > env var > built-in default.
 
+## Supported widget types
+
+agent-flutter recognizes 93 Flutter widget types, mapped to ~30 display types. See `WIDGET_SUPPORT.md` for the full coverage matrix including Marionette detection status.
+
+### Interactive types (appear in `snapshot -i`)
+
+| Display Type | Material Widgets | Cupertino Widgets |
+|---|---|---|
+| `button` | ElevatedButton, FilledButton, OutlinedButton, TextButton, IconButton, FloatingActionButton, SegmentedButton, MaterialButton | CupertinoButton |
+| `textfield` | TextField, TextFormField | CupertinoTextField, CupertinoTextFormFieldRow |
+| `searchbar` | SearchBar, SearchAnchor | CupertinoSearchTextField |
+| `switch` | Switch, SwitchListTile | CupertinoSwitch |
+| `checkbox` | Checkbox, CheckboxListTile | CupertinoCheckbox |
+| `radio` | Radio, RadioListTile | CupertinoRadio |
+| `slider` | Slider, RangeSlider | CupertinoSlider |
+| `dropdown` | DropdownButton, DropdownButtonFormField, DropdownMenu | — |
+| `menu` | PopupMenuButton, MenuAnchor | CupertinoContextMenu |
+| `chip` | Chip, ActionChip, ChoiceChip, FilterChip, InputChip | — |
+| `segmented` | — | CupertinoSegmentedControl, CupertinoSlidingSegmentedControl |
+| `picker` | DatePickerDialog, TimePickerDialog | CupertinoPicker, CupertinoDatePicker, CupertinoTimerPicker |
+| `dialog` | AlertDialog, SimpleDialog, BottomSheet | CupertinoAlertDialog, CupertinoActionSheet |
+| `stepper` | Stepper | — |
+| `snackbar` | SnackBar | — |
+| `gesture` | GestureDetector, InkWell, InkResponse, Dismissible, Draggable, LongPressDraggable | — |
+| `tab` | Tab | — |
+
+### Non-interactive types (excluded from `snapshot -i`)
+
+| Display Type | Widgets |
+|---|---|
+| `appbar` | AppBar, SliverAppBar, BottomAppBar, CupertinoNavigationBar |
+| `navbar` | BottomNavigationBar, NavigationBar, NavigationRail |
+| `drawer` | NavigationDrawer, Drawer |
+| `tabbar` | TabBar, CupertinoTabBar |
+| `tile` | ListTile, ExpansionTile, CupertinoListTile |
+| `card` | Card |
+| `table` | DataTable |
+| `panel` | ExpansionPanelList |
+| `banner` | MaterialBanner |
+| `tooltip` | Tooltip |
+| `list` | ListView, ReorderableListView |
+| `grid` | GridView |
+| `pageview` | PageView |
+| `refresh` | RefreshIndicator |
+| `label` | Text, RichText |
+| `image` | Image |
+| `icon` | Icon |
+| `container` | Container |
+| `column` | Column |
+| `row` | Row |
+| `stack` | Stack |
+| `scaffold` | Scaffold |
+
+Unknown widget types fall back to lowercase: `MyCustomWidget` → `mycustomwidget`.
+
 ## Schema discovery
 
 ```bash
