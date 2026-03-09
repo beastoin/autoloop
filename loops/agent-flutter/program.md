@@ -1,4 +1,4 @@
-# autoresearch: agent-flutter — Standalone Flutter CLI for AI Agents
+# agent-flutter — Standalone Flutter CLI for AI Agents
 
 Build a standalone CLI tool called `agent-flutter` that controls Flutter apps
 via Marionette, with the same UX patterns as agent-device and agent-browser.
@@ -190,7 +190,7 @@ Each iteration:
 2. `git add -A && git commit -m "feat: <description>"`
 3. Run: `pnpm build && pnpm run typecheck && pnpm test:unit`
 4. E2E test: connect to running Flutter app, run commands, verify output
-5. Log to `autoresearch/results.tsv`
+5. Log to `loops/agent-flutter/results.tsv`
 6. Keep if pass, revert if regress
 
 ## Rules

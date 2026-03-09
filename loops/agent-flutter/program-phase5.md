@@ -1,6 +1,6 @@
 # Phase 5: Agent-Friendliness Hardening for `agent-flutter`
 
-Build on the existing standalone CLI in `autoresearch/standalone/agent-flutter` (Phases 1–4 complete) to make it reliable for autonomous agents.
+Build on the existing standalone CLI in `loops/agent-flutter/agent-flutter` (Phases 1–4 complete) to make it reliable for autonomous agents.
 
 This phase is **not** about adding new interaction primitives. It is about making existing commands agent-grade:
 - Discoverable

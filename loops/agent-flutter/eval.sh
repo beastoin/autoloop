@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Eval harness for agent-flutter standalone CLI.
-# Usage: bash autoresearch/standalone/eval.sh
+# Usage: bash loops/agent-flutter/eval.sh
 # DO NOT MODIFY THIS FILE.
 
 set -uo pipefail
@@ -9,7 +9,7 @@ cd "$(dirname "$0")/../.."
 export PATH="/home/claude/tools/node/bin:$HOME/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 export NODE_OPTIONS="--experimental-strip-types"
 
-AGENT_FLUTTER_DIR="autoresearch/standalone/agent-flutter"
+AGENT_FLUTTER_DIR="loops/agent-flutter/agent-flutter"
 
 echo "---"
 
@@ -285,7 +285,7 @@ echo "p5_checks:        $P5_STATUS"
 # Step 4: E2E test (connect to real Flutter app if available)
 E2E_STATUS="skip"
 E2E_COUNT="0"
-if [ -f "autoresearch/standalone/e2e-test.ts" ]; then
+if [ -f "loops/agent-flutter/e2e-test.ts" ]; then
   # Check if emulator is running and app is up
   if adb devices 2>/dev/null | grep -q "emulator-5554"; then
     VM_LINE=$(adb -s emulator-5554 logcat -d -s flutter 2>/dev/null | grep -o "http://127\.0\.0\.1:[0-9]*/[^/]*/" | tail -1)
@@ -293,7 +293,7 @@ if [ -f "autoresearch/standalone/e2e-test.ts" ]; then
       VM_PORT=$(echo "$VM_LINE" | grep -oP ':\K[0-9]+' | head -1)
       adb -s emulator-5554 forward tcp:$VM_PORT tcp:$VM_PORT 2>/dev/null || true
       WS_URI=$(echo "$VM_LINE" | sed 's|^http://|ws://|')ws
-      if VM_SERVICE_URI="$WS_URI" AGENT_FLUTTER="$AGENT_FLUTTER_DIR" node --test autoresearch/standalone/e2e-test.ts > /tmp/af-eval-e2e.log 2>&1; then
+      if VM_SERVICE_URI="$WS_URI" AGENT_FLUTTER="$AGENT_FLUTTER_DIR" node --test loops/agent-flutter/e2e-test.ts > /tmp/af-eval-e2e.log 2>&1; then
         E2E_STATUS="pass"
         E2E_COUNT=$(grep -cE "^ok |# pass" /tmp/af-eval-e2e.log 2>/dev/null || echo "0")
       else
