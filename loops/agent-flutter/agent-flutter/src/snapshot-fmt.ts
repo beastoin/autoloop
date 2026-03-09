@@ -8,27 +8,18 @@ export type RefElement = FlutterElement & {
   ref: string;
 };
 
-/** Map Flutter widget types to lowercase display types.
- *  Covers all official Flutter interactive widgets (Material + Cupertino).
- *  See WIDGET_SUPPORT.md for full coverage matrix. */
+/** Map Flutter widget types to lowercase display types */
 const TYPE_MAP: Record<string, string> = {
-  // --- Material Buttons ---
   ElevatedButton: 'button',
   FilledButton: 'button',
   OutlinedButton: 'button',
   TextButton: 'button',
   IconButton: 'button',
   FloatingActionButton: 'button',
-  SegmentedButton: 'button',
-  MaterialButton: 'button',
-
-  // --- Material Text Input ---
+  Text: 'label',
+  RichText: 'label',
   TextField: 'textfield',
   TextFormField: 'textfield',
-  SearchBar: 'searchbar',
-  SearchAnchor: 'searchbar',
-
-  // --- Material Selection Controls ---
   Switch: 'switch',
   SwitchListTile: 'switch',
   Checkbox: 'checkbox',
@@ -36,103 +27,16 @@ const TYPE_MAP: Record<string, string> = {
   Radio: 'radio',
   RadioListTile: 'radio',
   Slider: 'slider',
-  RangeSlider: 'slider',
-
-  // --- Material Chips ---
-  Chip: 'chip',
-  ActionChip: 'chip',
-  ChoiceChip: 'chip',
-  FilterChip: 'chip',
-  InputChip: 'chip',
-
-  // --- Material Dropdowns & Menus ---
   DropdownButton: 'dropdown',
-  DropdownButtonFormField: 'dropdown',
-  DropdownMenu: 'dropdown',
   PopupMenuButton: 'menu',
-  MenuAnchor: 'menu',
-
-  // --- Material Pickers ---
-  DatePickerDialog: 'picker',
-  TimePickerDialog: 'picker',
-
-  // --- Material Dialogs & Sheets ---
-  AlertDialog: 'dialog',
-  SimpleDialog: 'dialog',
-  BottomSheet: 'dialog',
-  MaterialBanner: 'banner',
-  SnackBar: 'snackbar',
-  Tooltip: 'tooltip',
-
-  // --- Material Navigation ---
-  AppBar: 'appbar',
-  SliverAppBar: 'appbar',
-  BottomAppBar: 'appbar',
-  BottomNavigationBar: 'navbar',
-  NavigationBar: 'navbar',
-  NavigationRail: 'navbar',
-  NavigationDrawer: 'drawer',
-  Drawer: 'drawer',
-  TabBar: 'tabbar',
-  Tab: 'tab',
-
-  // --- Material Lists & Content ---
-  ListTile: 'tile',
-  ExpansionTile: 'tile',
-  Card: 'card',
-  DataTable: 'table',
-  Stepper: 'stepper',
-  ExpansionPanelList: 'panel',
-
-  // --- Material Touch & Gesture ---
   GestureDetector: 'gesture',
   InkWell: 'gesture',
-  InkResponse: 'gesture',
-  Dismissible: 'gesture',
-  Draggable: 'gesture',
-  LongPressDraggable: 'gesture',
-
-  // --- Cupertino Buttons ---
-  CupertinoButton: 'button',
-
-  // --- Cupertino Input ---
-  CupertinoTextField: 'textfield',
-  CupertinoSearchTextField: 'searchbar',
-  CupertinoTextFormFieldRow: 'textfield',
-
-  // --- Cupertino Selection Controls ---
-  CupertinoSwitch: 'switch',
-  CupertinoSlider: 'slider',
-  CupertinoCheckbox: 'checkbox',
-  CupertinoRadio: 'radio',
-  CupertinoSegmentedControl: 'segmented',
-  CupertinoSlidingSegmentedControl: 'segmented',
-
-  // --- Cupertino Pickers ---
-  CupertinoPicker: 'picker',
-  CupertinoDatePicker: 'picker',
-  CupertinoTimerPicker: 'picker',
-
-  // --- Cupertino Dialogs ---
-  CupertinoAlertDialog: 'dialog',
-  CupertinoActionSheet: 'dialog',
-  CupertinoContextMenu: 'menu',
-
-  // --- Cupertino Navigation ---
-  CupertinoNavigationBar: 'appbar',
-  CupertinoTabBar: 'tabbar',
-  CupertinoListTile: 'tile',
-
-  // --- Scrolling & Layout ---
-  ListView: 'list',
-  GridView: 'grid',
-  PageView: 'pageview',
-  ReorderableListView: 'list',
-  RefreshIndicator: 'refresh',
-
-  // --- Display (non-interactive) ---
-  Text: 'label',
-  RichText: 'label',
+  ListTile: 'tile',
+  Card: 'card',
+  AppBar: 'appbar',
+  BottomNavigationBar: 'navbar',
+  TabBar: 'tabbar',
+  Tab: 'tab',
   Image: 'image',
   Icon: 'icon',
   Container: 'container',
@@ -177,7 +81,6 @@ export function formatSnapshot(elements: FlutterElement[]): { lines: string[]; r
 /** Interactive element types that agents can interact with */
 const INTERACTIVE_TYPES = new Set([
   'button', 'textfield', 'switch', 'checkbox', 'radio', 'slider', 'dropdown', 'menu', 'gesture', 'tab',
-  'chip', 'searchbar', 'segmented', 'picker', 'dialog', 'stepper', 'snackbar',
 ]);
 
 /** Filter to only interactive elements */
