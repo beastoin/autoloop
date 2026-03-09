@@ -342,11 +342,22 @@ public class AXClient {
             return false
         }
         let appWindows = windowList.filter { ($0[kCGWindowOwnerPID as String] as? Int) == pid }
-        guard let firstWindow = appWindows.first,
-              let windowID = firstWindow[kCGWindowNumber as String] as? CGWindowID else {
+        // Pick the largest window (by area) to avoid capturing tiny utility/overlay windows
+        guard let mainWindow = appWindows.max(by: { a, b in
+            let aSize = Self.windowArea(a)
+            let bSize = Self.windowArea(b)
+            return aSize < bSize
+        }), let windowID = mainWindow[kCGWindowNumber as String] as? CGWindowID else {
             return false
         }
-        guard let image = CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, [.boundsIgnoreFraming]) else {
+        let bounds: CGRect
+        if let boundsDict = mainWindow[kCGWindowBounds as String] as? [String: Any],
+           let boundsRect = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) {
+            bounds = boundsRect
+        } else {
+            bounds = .null
+        }
+        guard let image = CGWindowListCreateImage(bounds, .optionIncludingWindow, windowID, [.boundsIgnoreFraming]) else {
             return false
         }
         let url = URL(fileURLWithPath: path)
@@ -355,6 +366,13 @@ public class AXClient {
         }
         CGImageDestinationAddImage(dest, image, nil)
         return CGImageDestinationFinalize(dest)
+    }
+
+    private static func windowArea(_ window: [String: Any]) -> Double {
+        guard let bounds = window[kCGWindowBounds as String] as? [String: Any],
+              let w = bounds["Width"] as? Double,
+              let h = bounds["Height"] as? Double else { return 0 }
+        return w * h
     }
 
     public static func collectElements(element: AXUIElement, interactiveOnly: Bool, into result: inout [AXUIElement], maxDepth: Int = 20, depth: Int = 0) {
