@@ -15,14 +15,18 @@ Autonomous loop system for building agent-grade CLIs from objectives.
 .
 ├── loops/                              # one directory per build loop
 │   ├── agent-flutter/                  # loop 1: Flutter testing CLI
+│   │   ├── program*.md                 # phase instructions
+│   │   ├── eval.sh                     # phase evaluator (immutable)
+│   │   ├── e2e-test.ts                 # e2e test suite (immutable)
+│   │   ├── README.md                   # loop overview + phase history
+│   │   ├── CLAUDE.md                   # agent instructions for this loop
+│   │   ├── AGENTS.md                   # operating guide for this loop
+│   │   └── agent-flutter/              # build target (→ beastoin/agent-flutter)
 │   └── agent-swift/                    # loop 2: macOS Accessibility CLI
 │       ├── program*.md                 # phase instructions
 │       ├── eval.sh                     # phase evaluator (immutable)
-│       ├── e2e-test.ts                 # e2e test suite (immutable)
-│       ├── README.md                   # loop overview + phase history
-│       ├── CLAUDE.md                   # agent instructions for this loop
 │       ├── AGENTS.md                   # operating guide for this loop
-│       └── agent-flutter/              # build target (→ beastoin/agent-flutter)
+│       └── agent-swift/                # build target (→ beastoin/agent-swift)
 ├── shared/                             # resources shared across loops
 │   └── e2e-flutter-app/                # Marionette-enabled Flutter test app
 ├── README.md                           # this file (shared principles)
