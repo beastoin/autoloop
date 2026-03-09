@@ -13,6 +13,7 @@ Practical guide for Claude Code instances working in `beastoin/autoloop`.
 | Loop | Path | Build target |
 |------|------|-------------|
 | agent-flutter | `loops/agent-flutter/` | `loops/agent-flutter/agent-flutter/` |
+| agent-swift | `loops/agent-swift/` | `loops/agent-swift/agent-swift/` |
 
 ## Autoloop model
 
