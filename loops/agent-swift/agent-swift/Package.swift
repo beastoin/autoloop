@@ -20,12 +20,19 @@ let package = Package(
         .executableTarget(
             name: "agent-swift",
             dependencies: [
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                "AgentSwiftLib"
+            ]
+        ),
+        .target(
+            name: "AgentSwiftLib",
+            dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
             ]
         ),
         .testTarget(
             name: "agent-swiftTests",
-            dependencies: ["agent-swift"]
+            dependencies: ["AgentSwiftLib"]
         )
     ]
 )
