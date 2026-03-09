@@ -374,6 +374,21 @@ struct PressCommand: ParsableCommand {
             acted = AXClient.performPress(element: target, actionName: "AXConfirm")
         }
 
+        // Fallback: CGEvent click when AXPress/AXConfirm fail (SwiftUI NavigationLink)
+        if !acted {
+            let tree = AXClient.walkTree(element: root)
+            let allNodes = AXClient.flattenTree(tree)
+            let nodes = useInteractive ? allNodes.filter { $0.isInteractive } : allNodes
+            if index < nodes.count, let pos = nodes[index].position, let sz = nodes[index].size {
+                let center = CGPoint(x: pos.x + sz.width / 2, y: pos.y + sz.height / 2)
+                if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
+                    app.activate()
+                    Thread.sleep(forTimeInterval: 0.1)
+                }
+                acted = AXClient.performClick(at: center)
+            }
+        }
+
         if acted {
             if globals.useJson {
                 print(Output.json(PressResult(pressed: ref, success: true)))
@@ -601,7 +616,7 @@ struct FindCommand: ParsableCommand {
     @Argument(help: "Value to match")
     var value: String
 
-    @Argument(help: "Optional chained action: press, fill, or get")
+    @Argument(help: "Optional chained action: press, click, fill, or get")
     var action: String?
 
     @Argument(help: "Action argument (text for fill, property for get)")
@@ -714,6 +729,15 @@ struct FindCommand: ParsableCommand {
         case "press":
             var acted = AXClient.performPress(element: target, actionName: "AXPress")
             if !acted { acted = AXClient.performPress(element: target, actionName: "AXConfirm") }
+            // Fallback: CGEvent click when AXPress/AXConfirm fail (SwiftUI NavigationLink)
+            if !acted, let pos = matchedNode.position, let sz = matchedNode.size {
+                let center = CGPoint(x: pos.x + sz.width / 2, y: pos.y + sz.height / 2)
+                if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
+                    app.activate()
+                    Thread.sleep(forTimeInterval: 0.1)
+                }
+                acted = AXClient.performClick(at: center)
+            }
             if acted {
                 if globals.useJson {
                     print(Output.json(FindActionResult(found: matchedRef, action: "press", success: true)))
@@ -723,6 +747,28 @@ struct FindCommand: ParsableCommand {
             } else {
                 Output.printError(code: "ACTION_NOT_SUPPORTED", message: "Cannot press \(matchedRef)",
                                 hint: "Pick a different target", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+        case "click":
+            guard let pos = matchedNode.position, let sz = matchedNode.size else {
+                Output.printError(code: "NO_BOUNDS", message: "Element \(matchedRef) has no position/size",
+                                hint: "Element may be offscreen", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            let center = CGPoint(x: pos.x + sz.width / 2, y: pos.y + sz.height / 2)
+            if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
+                app.activate()
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+            if AXClient.performClick(at: center) {
+                if globals.useJson {
+                    print(Output.json(FindActionResult(found: matchedRef, action: "click", success: true)))
+                } else {
+                    print("Found \(matchedRef) → clicked at (\(Int(center.x)), \(Int(center.y)))")
+                }
+            } else {
+                Output.printError(code: "CLICK_FAILED", message: "Failed to click \(matchedRef)",
+                                hint: "Ensure Accessibility permission is granted", useJson: globals.useJson)
                 throw ExitCode(2)
             }
         case "fill":
@@ -760,7 +806,7 @@ struct FindCommand: ParsableCommand {
             }
         default:
             Output.printError(code: "INVALID_ARGS", message: "Unknown action: \(action)",
-                            hint: "Use: press, fill, or get", useJson: globals.useJson)
+                            hint: "Use: press, click, fill, or get", useJson: globals.useJson)
             throw ExitCode(2)
         }
     }

@@ -68,6 +68,35 @@ final class ClickTests: XCTestCase {
 
     // MARK: - Schema
 
+    // MARK: - Press→Click fallback logic
+
+    func testPressFallbackNeedsBounds() {
+        // When AXPress fails and element has no bounds, fallback can't work
+        let noBounds = AXNode(role: "AXGroup", subrole: nil, title: "NavLink", axDescription: nil,
+                             value: nil, identifier: nil, childStaticText: nil, enabled: true, focused: false,
+                             position: nil, size: nil, actions: [], children: [])
+        // No position/size → fallback click is impossible
+        XCTAssertNil(noBounds.position)
+        XCTAssertNil(noBounds.size)
+        XCTAssertNil(noBounds.bounds)
+    }
+
+    func testPressFallbackWithBounds() {
+        // When AXPress fails but element has bounds, fallback can compute center
+        let withBounds = AXNode(role: "AXGroup", subrole: nil, title: "NavLink", axDescription: nil,
+                               value: nil, identifier: nil, childStaticText: nil, enabled: true, focused: false,
+                               position: CGPoint(x: 50, y: 100), size: CGSize(width: 200, height: 40),
+                               actions: [], children: [])
+        XCTAssertNotNil(withBounds.position)
+        XCTAssertNotNil(withBounds.size)
+        let center = CGPoint(x: withBounds.position!.x + withBounds.size!.width / 2,
+                            y: withBounds.position!.y + withBounds.size!.height / 2)
+        XCTAssertEqual(center.x, 150.0)
+        XCTAssertEqual(center.y, 120.0)
+    }
+
+    // MARK: - Schema
+
     func testClickSchemaShape() {
         let schema = CommandSchema(
             name: "click",
