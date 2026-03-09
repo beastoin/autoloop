@@ -243,7 +243,8 @@ agent-flutter --no-json snapshot | head
 | Variable | Purpose | Default |
 |---|---|---|
 | `AGENT_FLUTTER_DEVICE` | ADB device ID | `emulator-5554` |
-| `AGENT_FLUTTER_URI` | Default VM Service URI for `connect` | auto-detect from logcat |
+| `AGENT_FLUTTER_URI` | Default VM Service URI for `connect` | auto-detect |
+| `AGENT_FLUTTER_LOG` | Path to `flutter run` log file for host-side URI detection | unset |
 | `AGENT_FLUTTER_HOME` | Session directory (`session.json`) | `~/.agent-flutter` |
 | `AGENT_FLUTTER_TIMEOUT` | Default `wait` timeout ms | `10000` |
 | `AGENT_FLUTTER_JSON` | JSON output mode (`1`) | unset |
