@@ -118,6 +118,9 @@ fi
 if [ -f "loops/agent-swift/program-phase5.md" ]; then
   PHASE=5
 fi
+if [ -f "loops/agent-swift/program-phase2b.md" ]; then
+  PHASE=6  # 2b widget coverage supplement
+fi
 echo "phase:            $PHASE"
 
 # Step 1: Build check
@@ -682,6 +685,75 @@ if [ "$PHASE" -ge 5 ] && [ "$CLI_STATUS" = "pass" ]; then
 fi
 echo "p5_polish:        $P5_POLISH"
 
+# Phase 2b gates: Complete widget coverage
+P2B_WIDGET="skip"
+if [ "$PHASE" -ge 6 ] && [ "$TEST_STATUS" = "pass" ]; then
+  P2B_PASS=0
+  P2B_TOTAL=0
+
+  # Gate 1: ROLE_MAP has >= 72 entries
+  P2B_TOTAL=$((P2B_TOTAL + 1))
+  ROLEMAP_COUNT=$(grep -c '"AX[A-Za-z]*":' "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/AX/AXClient.swift" 2>/dev/null || echo "0")
+  if [ "$ROLEMAP_COUNT" -ge 72 ]; then
+    P2B_PASS=$((P2B_PASS + 1))
+  fi
+
+  # Gate 2: AXTimeField in ROLE_MAP
+  P2B_TOTAL=$((P2B_TOTAL + 1))
+  if grep -q '"AXTimeField"' "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/AX/AXClient.swift" 2>/dev/null; then
+    P2B_PASS=$((P2B_PASS + 1))
+  fi
+
+  # Gate 3: AXDockItem in ROLE_MAP
+  P2B_TOTAL=$((P2B_TOTAL + 1))
+  if grep -q '"AXDockItem"' "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/AX/AXClient.swift" 2>/dev/null; then
+    P2B_PASS=$((P2B_PASS + 1))
+  fi
+
+  # Gate 4: AXGrid in ROLE_MAP
+  P2B_TOTAL=$((P2B_TOTAL + 1))
+  if grep -q '"AXGrid"' "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/AX/AXClient.swift" 2>/dev/null; then
+    P2B_PASS=$((P2B_PASS + 1))
+  fi
+
+  # Gate 5: AXPage in ROLE_MAP
+  P2B_TOTAL=$((P2B_TOTAL + 1))
+  if grep -q '"AXPage"' "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/AX/AXClient.swift" 2>/dev/null; then
+    P2B_PASS=$((P2B_PASS + 1))
+  fi
+
+  # Gate 6: WIDGET_SUPPORT.md exists and mentions AXTimeField
+  P2B_TOTAL=$((P2B_TOTAL + 1))
+  if [ -f "$AGENT_SWIFT_DIR/WIDGET_SUPPORT.md" ] && grep -q "AXTimeField" "$AGENT_SWIFT_DIR/WIDGET_SUPPORT.md" 2>/dev/null; then
+    P2B_PASS=$((P2B_PASS + 1))
+  fi
+
+  # Gate 7: Tests >= 69
+  P2B_TOTAL=$((P2B_TOTAL + 1))
+  TEST_NUM=$(echo "$TEST_COUNT" | tr -dc '0-9')
+  if [ "$TEST_NUM" -ge 69 ]; then
+    P2B_PASS=$((P2B_PASS + 1))
+  fi
+
+  # Gate 8: Live snapshot against System Settings produces valid JSON
+  P2B_TOTAL=$((P2B_TOTAL + 1))
+  if [ -x "$BINARY_PATH" ]; then
+    "$BINARY_PATH" connect --bundle-id com.apple.systempreferences --json > /dev/null 2>&1 || true
+    "$BINARY_PATH" snapshot -i --json > /tmp/as-eval-sysset.json 2>&1 || true
+    "$BINARY_PATH" disconnect --json > /dev/null 2>&1 || true
+    if json_check /tmp/as-eval-sysset.json array; then
+      P2B_PASS=$((P2B_PASS + 1))
+    fi
+  fi
+
+  if [ "$P2B_PASS" -eq "$P2B_TOTAL" ]; then
+    P2B_WIDGET="pass"
+  else
+    P2B_WIDGET="fail ($P2B_PASS/$P2B_TOTAL)"
+  fi
+fi
+echo "p2b_widget_cov:   $P2B_WIDGET"
+
 # Step 5: E2E test (optional; enabled when e2e-test.sh exists)
 E2E_STATUS="skip"
 if [ -x "loops/agent-swift/e2e-test.sh" ]; then
@@ -741,6 +813,17 @@ if [ "$BUILD_STATUS" = "pass" ] && [ "$TEST_STATUS" = "pass" ] && [ "$CONTRACT_S
          [ "$P3_INTERACTION" = "pass" ] && \
          [ "$P4_AUTONOMY" = "pass" ] && \
          [ "$P5_POLISH" = "pass" ]; then
+        PHASE_COMPLETE="yes"
+      fi
+      ;;
+    6)
+      if [ "$HELP_STATUS" = "pass" ] && \
+         [ "$JSON_STATUS" = "pass" ] && \
+         [ "$EXIT_STATUS" = "pass" ] && \
+         [ "$P3_INTERACTION" = "pass" ] && \
+         [ "$P4_AUTONOMY" = "pass" ] && \
+         [ "$P5_POLISH" = "pass" ] && \
+         [ "$P2B_WIDGET" = "pass" ]; then
         PHASE_COMPLETE="yes"
       fi
       ;;
