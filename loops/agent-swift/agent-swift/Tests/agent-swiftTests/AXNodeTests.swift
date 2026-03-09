@@ -3,66 +3,66 @@ import XCTest
 
 final class AXNodeTests: XCTestCase {
     func testDisplayType() {
-        let button = AXNode(role: "AXButton", subrole: nil, title: "OK", value: nil,
-                           identifier: nil, enabled: true, focused: false,
+        let button = AXNode(role: "AXButton", subrole: nil, title: "OK", axDescription: nil, value: nil,
+                           identifier: nil, childStaticText: nil, enabled: true, focused: false,
                            position: nil, size: nil, actions: ["AXPress"], children: [])
         XCTAssertEqual(button.displayType, "button")
 
-        let textfield = AXNode(role: "AXTextField", subrole: nil, title: nil, value: "hello",
-                              identifier: "nameField", enabled: true, focused: true,
+        let textfield = AXNode(role: "AXTextField", subrole: nil, title: nil, axDescription: nil, value: "hello",
+                              identifier: "nameField", childStaticText: nil, enabled: true, focused: true,
                               position: nil, size: nil, actions: [], children: [])
         XCTAssertEqual(textfield.displayType, "textfield")
 
-        let staticText = AXNode(role: "AXStaticText", subrole: nil, title: nil, value: "Label",
-                               identifier: nil, enabled: true, focused: false,
+        let staticText = AXNode(role: "AXStaticText", subrole: nil, title: nil, axDescription: nil, value: "Label",
+                               identifier: nil, childStaticText: nil, enabled: true, focused: false,
                                position: nil, size: nil, actions: [], children: [])
         XCTAssertEqual(staticText.displayType, "statictext")
     }
 
     func testIsInteractive() {
-        let button = AXNode(role: "AXButton", subrole: nil, title: "OK", value: nil,
-                           identifier: nil, enabled: true, focused: false,
+        let button = AXNode(role: "AXButton", subrole: nil, title: "OK", axDescription: nil, value: nil,
+                           identifier: nil, childStaticText: nil, enabled: true, focused: false,
                            position: nil, size: nil, actions: ["AXPress"], children: [])
         XCTAssertTrue(button.isInteractive)
 
-        let staticText = AXNode(role: "AXStaticText", subrole: nil, title: nil, value: "Label",
-                               identifier: nil, enabled: true, focused: false,
+        let staticText = AXNode(role: "AXStaticText", subrole: nil, title: nil, axDescription: nil, value: "Label",
+                               identifier: nil, childStaticText: nil, enabled: true, focused: false,
                                position: nil, size: nil, actions: [], children: [])
         XCTAssertFalse(staticText.isInteractive)
 
         // Non-standard role but has AXPress action
-        let custom = AXNode(role: "AXCustom", subrole: nil, title: "Click", value: nil,
-                           identifier: nil, enabled: true, focused: false,
+        let custom = AXNode(role: "AXCustom", subrole: nil, title: "Click", axDescription: nil, value: nil,
+                           identifier: nil, childStaticText: nil, enabled: true, focused: false,
                            position: nil, size: nil, actions: ["AXPress"], children: [])
         XCTAssertTrue(custom.isInteractive)
     }
 
     func testDisplayLabel() {
-        let withTitle = AXNode(role: "AXButton", subrole: nil, title: "Save", value: nil,
-                              identifier: nil, enabled: true, focused: false,
+        let withTitle = AXNode(role: "AXButton", subrole: nil, title: "Save", axDescription: nil, value: nil,
+                              identifier: nil, childStaticText: nil, enabled: true, focused: false,
                               position: nil, size: nil, actions: [], children: [])
         XCTAssertEqual(withTitle.displayLabel, "Save")
 
-        let withValue = AXNode(role: "AXTextField", subrole: nil, title: nil, value: "hello",
-                              identifier: nil, enabled: true, focused: false,
+        let withValue = AXNode(role: "AXTextField", subrole: nil, title: nil, axDescription: nil, value: "hello",
+                              identifier: nil, childStaticText: nil, enabled: true, focused: false,
                               position: nil, size: nil, actions: [], children: [])
         XCTAssertEqual(withValue.displayLabel, "hello")
 
-        let neither = AXNode(role: "AXGroup", subrole: nil, title: nil, value: nil,
-                            identifier: nil, enabled: true, focused: false,
+        let neither = AXNode(role: "AXGroup", subrole: nil, title: nil, axDescription: nil, value: nil,
+                            identifier: nil, childStaticText: nil, enabled: true, focused: false,
                             position: nil, size: nil, actions: [], children: [])
         XCTAssertNil(neither.displayLabel)
     }
 
     func testFlattenTree() {
-        let child1 = AXNode(role: "AXButton", subrole: nil, title: "B1", value: nil,
-                           identifier: nil, enabled: true, focused: false,
+        let child1 = AXNode(role: "AXButton", subrole: nil, title: "B1", axDescription: nil, value: nil,
+                           identifier: nil, childStaticText: nil, enabled: true, focused: false,
                            position: nil, size: nil, actions: [], children: [])
-        let child2 = AXNode(role: "AXButton", subrole: nil, title: "B2", value: nil,
-                           identifier: nil, enabled: true, focused: false,
+        let child2 = AXNode(role: "AXButton", subrole: nil, title: "B2", axDescription: nil, value: nil,
+                           identifier: nil, childStaticText: nil, enabled: true, focused: false,
                            position: nil, size: nil, actions: [], children: [])
-        let parent = AXNode(role: "AXGroup", subrole: nil, title: nil, value: nil,
-                           identifier: nil, enabled: true, focused: false,
+        let parent = AXNode(role: "AXGroup", subrole: nil, title: nil, axDescription: nil, value: nil,
+                           identifier: nil, childStaticText: nil, enabled: true, focused: false,
                            position: nil, size: nil, actions: [], children: [child1, child2])
 
         let flat = AXClient.flattenTree(parent)
@@ -73,8 +73,8 @@ final class AXNodeTests: XCTestCase {
     }
 
     func testToRefEntry() {
-        let node = AXNode(role: "AXButton", subrole: nil, title: "Save", value: nil,
-                         identifier: "saveBtn", enabled: true, focused: false,
+        let node = AXNode(role: "AXButton", subrole: nil, title: "Save", axDescription: nil, value: nil,
+                         identifier: "saveBtn", childStaticText: nil, enabled: true, focused: false,
                          position: CGPoint(x: 10, y: 20), size: CGSize(width: 80, height: 30),
                          actions: ["AXPress"], children: [])
         let entry = node.toRefEntry()

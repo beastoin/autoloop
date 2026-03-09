@@ -54,8 +54,10 @@ public struct AXNode {
     public let role: String
     public let subrole: String?
     public let title: String?
+    public let axDescription: String?
     public let value: String?
     public let identifier: String?
+    public let childStaticText: String?
     public let enabled: Bool
     public let focused: Bool
     public let position: CGPoint?
@@ -63,14 +65,16 @@ public struct AXNode {
     public let actions: [String]
     public let children: [AXNode]
 
-    public init(role: String, subrole: String?, title: String?, value: String?,
-                identifier: String?, enabled: Bool, focused: Bool,
+    public init(role: String, subrole: String?, title: String?, axDescription: String?, value: String?,
+                identifier: String?, childStaticText: String?, enabled: Bool, focused: Bool,
                 position: CGPoint?, size: CGSize?, actions: [String], children: [AXNode]) {
         self.role = role
         self.subrole = subrole
         self.title = title
+        self.axDescription = axDescription
         self.value = value
         self.identifier = identifier
+        self.childStaticText = childStaticText
         self.enabled = enabled
         self.focused = focused
         self.position = position
@@ -117,7 +121,8 @@ public struct AXNode {
     }
 
     public var displayLabel: String? {
-        return title ?? value
+        // SwiftUI buttons expose text via AXDescription or child AXStaticText, not AXTitle
+        return title ?? axDescription ?? childStaticText ?? value
     }
 
     public var bounds: SessionData.RefEntry.Bounds? {
@@ -169,6 +174,7 @@ public class AXClient {
         let role: String = attr(element, kAXRoleAttribute) ?? "AXUnknown"
         let subrole: String? = attr(element, kAXSubroleAttribute)
         let title: String? = attr(element, kAXTitleAttribute)
+        let axDescription: String? = attr(element, kAXDescriptionAttribute)
         let rawValue: AnyObject? = {
             var v: AnyObject?
             AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &v)
@@ -214,12 +220,26 @@ public class AXClient {
             }
         }
 
+        // Extract label from child AXStaticText elements (SwiftUI button pattern)
+        let childStaticText: String? = {
+            guard title == nil && axDescription == nil else { return nil }
+            let texts = children.compactMap { child -> String? in
+                if child.role == "AXStaticText" {
+                    return child.title ?? child.value
+                }
+                return nil
+            }
+            return texts.isEmpty ? nil : texts.joined(separator: " ")
+        }()
+
         return AXNode(
             role: role,
             subrole: subrole,
             title: title,
+            axDescription: axDescription,
             value: value,
             identifier: identifier,
+            childStaticText: childStaticText,
             enabled: enabled,
             focused: focused,
             position: position,

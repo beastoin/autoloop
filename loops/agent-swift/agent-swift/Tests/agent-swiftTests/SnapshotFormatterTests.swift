@@ -4,14 +4,14 @@ import XCTest
 final class SnapshotFormatterTests: XCTestCase {
     func testFormatHumanBasic() {
         let nodes = [
-            (ref: "e1", node: AXNode(role: "AXButton", subrole: nil, title: "Save", value: nil,
-                                    identifier: "saveBtn", enabled: true, focused: false,
+            (ref: "e1", node: AXNode(role: "AXButton", subrole: nil, title: "Save", axDescription: nil, value: nil,
+                                    identifier: "saveBtn", childStaticText: nil, enabled: true, focused: false,
                                     position: nil, size: nil, actions: ["AXPress"], children: [])),
-            (ref: "e2", node: AXNode(role: "AXTextField", subrole: nil, title: nil, value: "hello",
-                                    identifier: nil, enabled: true, focused: false,
+            (ref: "e2", node: AXNode(role: "AXTextField", subrole: nil, title: nil, axDescription: nil, value: "hello",
+                                    identifier: nil, childStaticText: nil, enabled: true, focused: false,
                                     position: nil, size: nil, actions: [], children: [])),
-            (ref: "e3", node: AXNode(role: "AXStaticText", subrole: nil, title: nil, value: "Ready",
-                                    identifier: nil, enabled: true, focused: false,
+            (ref: "e3", node: AXNode(role: "AXStaticText", subrole: nil, title: nil, axDescription: nil, value: "Ready",
+                                    identifier: nil, childStaticText: nil, enabled: true, focused: false,
                                     position: nil, size: nil, actions: [], children: []))
         ]
 
@@ -27,8 +27,8 @@ final class SnapshotFormatterTests: XCTestCase {
 
     func testFormatHumanNoLabel() {
         let nodes = [
-            (ref: "e1", node: AXNode(role: "AXGroup", subrole: nil, title: nil, value: nil,
-                                    identifier: nil, enabled: true, focused: false,
+            (ref: "e1", node: AXNode(role: "AXGroup", subrole: nil, title: nil, axDescription: nil, value: nil,
+                                    identifier: nil, childStaticText: nil, enabled: true, focused: false,
                                     position: nil, size: nil, actions: [], children: []))
         ]
 
@@ -38,8 +38,8 @@ final class SnapshotFormatterTests: XCTestCase {
 
     func testFormatJsonValid() {
         let nodes = [
-            (ref: "e1", node: AXNode(role: "AXButton", subrole: nil, title: "OK", value: nil,
-                                    identifier: nil, enabled: true, focused: false,
+            (ref: "e1", node: AXNode(role: "AXButton", subrole: nil, title: "OK", axDescription: nil, value: nil,
+                                    identifier: nil, childStaticText: nil, enabled: true, focused: false,
                                     position: CGPoint(x: 10, y: 20), size: CGSize(width: 80, height: 30),
                                     actions: ["AXPress"], children: []))
         ]

@@ -12,6 +12,11 @@ Operating guide for AI agents working in the agent-swift build loop.
 2. Accessibility trust enabled for the terminal/agent process running `agent-swift`
 3. Target app is running and exposes accessibility elements
 4. Read current `program*.md` and `eval.sh` before changing code
+5. **If running over SSH**: AX tree access requires the GUI session context. Run commands as the console user:
+   ```bash
+   sudo launchctl asuser 501 sudo -u <gui-user> agent-swift snapshot -i
+   ```
+   Find the GUI user UID with `id -u <username>` and username with `stat -f %Su /dev/console`.
 
 ## Canonical workflow
 
@@ -172,9 +177,9 @@ agent-swift press @e2
 
 ### JSON-first automation
 ```bash
-agent-swift --json doctor
-agent-swift --json status
-agent-swift --json snapshot -i
+agent-swift doctor --json
+agent-swift status --json
+agent-swift snapshot -i --json
 ```
 
 ## Loop control files

@@ -1,6 +1,7 @@
 import ArgumentParser
 import ApplicationServices
 import Foundation
+import AppKit
 import AgentSwiftLib
 
 struct AgentSwift: ParsableCommand {
@@ -140,7 +141,8 @@ struct ConnectCommand: ParsableCommand {
                 throw ExitCode(2)
             }
             resolvedPid = p
-            resolvedBundleId = bundleId
+            // Resolve bundleId from PID if not provided
+            resolvedBundleId = bundleId ?? NSRunningApplication(processIdentifier: pid_t(p))?.bundleIdentifier
         } else if let bid = bundleId {
             guard let p = AXClient.resolvePID(bundleId: bid) else {
                 Output.printError(code: "APP_NOT_FOUND", message: "No running app with bundle ID: \(bid)",
