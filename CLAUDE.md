@@ -14,6 +14,7 @@ Practical guide for Claude Code instances working in `beastoin/autoloop`.
 |------|------|-------------|
 | agent-flutter | `loops/agent-flutter/` | `loops/agent-flutter/agent-flutter/` |
 | agent-swift | `loops/agent-swift/` | `loops/agent-swift/agent-swift/` |
+| flow-walker | `loops/flow-walker/` | `loops/flow-walker/flow-walker/` |
 
 ## Autoloop model
 
