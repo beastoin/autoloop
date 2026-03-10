@@ -127,13 +127,16 @@ export async function detectVmServiceUriAsync(deviceId?: string): Promise<string
 }
 
 /**
- * Extract port from a VM Service URI and set up ADB port forwarding.
+ * Extract port from a VM Service URI and set up port forwarding via transport.
  */
 export function setupPortForwarding(uri: string, deviceId?: string): void {
   const device = deviceId ?? process.env.AGENT_FLUTTER_DEVICE ?? 'emulator-5554';
   const portMatch = uri.match(/:(\d+)\//);
   if (!portMatch) return;
   const port = portMatch[1];
+  // Use ADB for Android, no-op for iOS (simulator shares host network)
+  const platform = process.env.AGENT_FLUTTER_PLATFORM;
+  if (platform === 'ios') return;
   try {
     execSync(`adb -s ${device} forward tcp:${port} tcp:${port}`, { timeout: 5000 });
   } catch {
