@@ -21,25 +21,26 @@ export async function screenshotCommand(args: string[]): Promise<void> {
   const outPath = args[0] ?? 'screenshot.png';
 
   const session = loadSession();
-  if (!session) throw new AgentFlutterError(ErrorCodes.NOT_CONNECTED, 'Not connected', 'Run: agent-flutter connect');
 
-  // Try Marionette screenshot first, fall back to platform
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
-  try {
-    const buf = await client.takeScreenshot();
-    if (buf) {
-      writeFileSync(outPath, buf);
-      console.log(`Screenshot saved: ${outPath}`);
-      return;
+  // Try Marionette screenshot first if connected
+  if (session) {
+    const client = new VmServiceClient();
+    try {
+      await client.connect(session.vmServiceUri);
+      const buf = await client.takeScreenshot();
+      if (buf) {
+        writeFileSync(outPath, buf);
+        console.log(`Screenshot saved: ${outPath}`);
+        return;
+      }
+    } catch {
+      // Marionette screenshot not available, fall back
+    } finally {
+      try { await client.disconnect(); } catch { /* ignore */ }
     }
-  } catch {
-    // Marionette screenshot not available, fall back
-  } finally {
-    await client.disconnect();
   }
 
-  // Platform fallback
+  // Platform fallback (works without a session)
   const transport = resolveTransport();
   try {
     const raw = transport.screenshot();

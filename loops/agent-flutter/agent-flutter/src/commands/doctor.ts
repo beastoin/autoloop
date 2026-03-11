@@ -59,7 +59,11 @@ export async function doctorCommand(args: string[]): Promise<void> {
   // 3. Flutter app running (VM Service URI)
   let vmUri: string | null = null;
   if (toolCheck.ok) {
-    vmUri = transport.detectVmServiceUri() ?? detectVmServiceUri(transport.deviceId);
+    vmUri = transport.detectVmServiceUri();
+    // Only try ADB-based detection on Android
+    if (!vmUri && transport.platform === 'android') {
+      vmUri = detectVmServiceUri(transport.deviceId);
+    }
     if (vmUri) {
       checks.push({ name: 'flutter_app', status: 'pass', message: `VM Service found: ${vmUri}` });
     } else {
