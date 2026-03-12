@@ -3,17 +3,18 @@ import assert from 'node:assert/strict';
 import { COMMAND_SCHEMAS, getCommandSchema, getSchemaEnvelope, SCHEMA_VERSION } from '../src/command-schema.ts';
 
 describe('COMMAND_SCHEMAS', () => {
-  it('contains walk, run, report, push, and schema commands', () => {
+  it('contains walk, run, report, push, get, and schema commands', () => {
     const names = COMMAND_SCHEMAS.map(s => s.name);
     assert.ok(names.includes('walk'));
     assert.ok(names.includes('run'));
     assert.ok(names.includes('report'));
     assert.ok(names.includes('push'));
+    assert.ok(names.includes('get'));
     assert.ok(names.includes('schema'));
   });
 
-  it('has exactly 5 commands', () => {
-    assert.equal(COMMAND_SCHEMAS.length, 5);
+  it('has exactly 6 commands', () => {
+    assert.equal(COMMAND_SCHEMAS.length, 6);
   });
 
   it('every schema has required fields', () => {
@@ -87,6 +88,25 @@ describe('COMMAND_SCHEMAS', () => {
     for (const schema of COMMAND_SCHEMAS) {
       for (const arg of schema.args) {
         assert.ok(validTypes.includes(arg.type), `${schema.name} arg ${arg.name}: invalid type "${arg.type}"`);
+      }
+    }
+  });
+
+  it('get schema has required run-id arg', () => {
+    const get = getCommandSchema('get');
+    assert.ok(get);
+    assert.ok(get.args.some(a => a.name === 'run-id' && a.required));
+  });
+
+  it('run, push, and get schemas have outputShape', () => {
+    for (const name of ['run', 'push', 'get']) {
+      const schema = getCommandSchema(name);
+      assert.ok(schema, `${name}: missing schema`);
+      assert.ok(schema.outputShape, `${name}: missing outputShape`);
+      assert.ok(schema.outputShape.length > 0, `${name}: outputShape is empty`);
+      for (const field of schema.outputShape) {
+        assert.ok(field.name, `${name}: outputShape field missing name`);
+        assert.ok(field.type, `${name}: outputShape field missing type`);
       }
     }
   });

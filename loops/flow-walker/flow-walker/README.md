@@ -5,7 +5,7 @@ Auto-discover app flows, execute YAML test flows, generate HTML reports.
 flow-walker is the **flow layer** — it defines, discovers, executes, and reports on flows. It uses [agent-flutter](https://github.com/beastoin/agent-flutter) and [agent-swift](https://github.com/beastoin/agent-swift) as **transport layers** that control specific platforms.
 
 ```
-flow-walker (flows: walk, run, report, push, schema)
+flow-walker (flows: walk, run, report, push, get, schema)
     |
 agent-flutter (Flutter apps on Android/iOS)
 agent-swift   (native macOS/iOS apps)
@@ -30,9 +30,15 @@ flow-walker report ./run-output/<run-id>/
 # Share report (hosted)
 flow-walker push ./run-output/<run-id>/
 
+# Retrieve run data
+flow-walker get 25h7afGwBK
+
 # Discover commands (agent-first)
 flow-walker schema
 flow-walker schema run
+
+# Version
+flow-walker --version
 ```
 
 ## Prerequisites
@@ -90,7 +96,7 @@ flow-walker push ./run-output/25h7afGwBK/
 # => URL: https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK
 
 flow-walker push ./run-output/25h7afGwBK/ --json
-# => {"url":"https://...","id":"25h7afGwBK","expiresAt":"2026-04-11T..."}
+# => {"id":"25h7afGwBK","url":"https://...","htmlUrl":"https://....html","expiresAt":"2026-04-11T..."}
 ```
 
 Reports are stored for 30 days. Re-pushing the same run is idempotent — returns the same URL with updated expiry. Use `FLOW_WALKER_API_URL` env var to point at a custom server.
@@ -104,6 +110,16 @@ curl https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK.json
 
 # Human: HTML report
 open https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK.html
+```
+
+### `get` — Retrieve run data
+
+Fetches structured run data from the hosted service by run ID. Returns JSON (the same run.json uploaded during push, minus local file paths).
+
+```bash
+flow-walker get 25h7afGwBK          # pretty-printed
+flow-walker get 25h7afGwBK --json   # compact (pipe-friendly)
+flow-walker get 25h7afGwBK | jq '.steps[] | select(.status=="fail")'
 ```
 
 ### `schema` — Agent discovery

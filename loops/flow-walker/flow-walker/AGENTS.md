@@ -5,11 +5,12 @@
 flow-walker is the **flow layer** — it discovers, executes, and reports on app flows.
 It uses [agent-flutter](https://github.com/beastoin/agent-flutter) and [agent-swift](https://github.com/beastoin/agent-swift) as **transport layers** that control specific platforms.
 
-**Five commands:**
+**Six commands:**
 - `walk` — BFS-explore the app, discover screens, generate YAML flows
 - `run` — Execute a YAML flow, produce run.json + video + screenshots
 - `report` — Generate self-contained HTML report from run results
 - `push` — Upload report to hosted service, return shareable URL
+- `get` — Fetch run data from hosted service by run ID
 - `schema` — Machine-readable command introspection (agent discovery)
 
 ## Agent-first workflow
@@ -29,8 +30,14 @@ flow-walker run flow.yaml --json      # → run.json with unique run ID
 flow-walker report ./run-output/<run-id>/
 
 # 5. Share (hosted)
-flow-walker push ./run-output/<run-id>/ --json  # → { url, id, expiresAt }
-# URL serves the report in a browser — no auth needed
+flow-walker push ./run-output/<run-id>/ --json  # → { id, url, htmlUrl, expiresAt }
+
+# 6. Retrieve run data later
+flow-walker get 25h7afGwBK --json               # → run.json content
+
+# Version check
+flow-walker --version                            # → flow-walker 0.1.0
+flow-walker --version --json                     # → {"version":"0.1.0"}
 ```
 
 ## Prerequisites
@@ -151,11 +158,31 @@ done
 
 ```json
 {
-  "url": "https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK",
   "id": "25h7afGwBK",
+  "url": "https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK",
+  "htmlUrl": "https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK.html",
   "expiresAt": "2026-04-11T13:22:12.070Z"
 }
 ```
+
+### Command outputShape (from schema)
+
+Commands that produce structured output declare their fields via `outputShape`:
+
+```json
+{
+  "name": "run",
+  "outputShape": [
+    { "name": "id", "type": "string", "description": "Unique 10-char run ID" },
+    { "name": "flow", "type": "string", "description": "Flow name" },
+    { "name": "result", "type": "pass|fail", "description": "Overall result" },
+    { "name": "duration", "type": "number", "description": "Total milliseconds" },
+    { "name": "steps", "type": "StepResult[]", "description": "Per-step results" }
+  ]
+}
+```
+
+Commands with `outputShape`: `run`, `push`, `get`. Use `flow-walker schema <cmd>` to inspect.
 
 ### Agent-readable run data
 
@@ -171,6 +198,14 @@ open https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK.html
 ```
 
 Returns run.json structure (without local file paths like video/screenshot filenames).
+
+CLI equivalent:
+
+```bash
+flow-walker get 25h7afGwBK          # pretty-printed JSON
+flow-walker get 25h7afGwBK --json   # compact JSON (pipe-friendly)
+flow-walker get 25h7afGwBK | jq '.steps[] | select(.status=="fail")'
+```
 
 ### Structured error (on failure)
 
@@ -232,7 +267,21 @@ steps:
 | `1` | Flow has failing steps |
 | `2` | Error (invalid args, file not found, device error) |
 
+## Error codes
+
+Every error returns `{"error": {"code": "...", "message": "...", "hint": "...", "diagnosticId": "..."}}`.
+
+| Code | Meaning | Common cause |
+|------|---------|-------------|
+| `INVALID_ARGS` | Bad CLI arguments | Missing required arg, unknown subcommand |
+| `INVALID_INPUT` | Input fails validation | Path traversal, control chars, bad URI format |
+| `FILE_NOT_FOUND` | Required file missing | No flow YAML, no run.json, remote run not found |
+| `FLOW_PARSE_ERROR` | Invalid YAML flow | Malformed YAML, missing name/steps |
+| `COMMAND_FAILED` | External command error | agent-flutter failure, network error, upload failure |
+
 ## Environment variables
+
+Precedence: CLI flag > env var > default.
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
@@ -240,5 +289,7 @@ steps:
 | `FLOW_WALKER_AGENT_PATH` | Path to agent-flutter binary | `agent-flutter` |
 | `FLOW_WALKER_DRY_RUN` | Enable dry-run mode | `0` |
 | `FLOW_WALKER_JSON` | Force JSON output | auto (TTY detection) |
-| `FLOW_WALKER_API_URL` | Hosted service URL for push | `https://flow-walker.beastoin.workers.dev` |
+| `FLOW_WALKER_API_URL` | Hosted service URL for push/get | `https://flow-walker.beastoin.workers.dev` |
 | `AGENT_FLUTTER_DEVICE` | ADB device ID | auto-detect |
+
+JSON output precedence: `--no-json` > `--json` > `FLOW_WALKER_JSON=1` > TTY auto-detect (non-TTY defaults to JSON).

@@ -1,10 +1,14 @@
-// Upload report.html + run.json to flow-walker hosted service
+// Remote API: upload/retrieve reports and run data from flow-walker hosted service
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { FlowWalkerError, ErrorCodes } from './errors.ts';
 
 const DEFAULT_API_URL = 'https://flow-walker.beastoin.workers.dev';
+
+function resolveApiUrl(apiUrl?: string): string {
+  return apiUrl || process.env.FLOW_WALKER_API_URL || DEFAULT_API_URL;
+}
 
 export interface PushResult {
   id: string;
@@ -18,9 +22,7 @@ export async function pushReport(
   runDir: string,
   options: { apiUrl?: string; runId?: string } = {},
 ): Promise<PushResult> {
-  const apiUrl = options.apiUrl
-    || process.env.FLOW_WALKER_API_URL
-    || DEFAULT_API_URL;
+  const apiUrl = resolveApiUrl(options.apiUrl);
 
   // Find report.html
   const reportPath = join(runDir, 'report.html');
@@ -127,4 +129,42 @@ export async function pushReport(
   }
 
   return result;
+}
+
+/** Fetch run data from hosted service */
+export async function getRunData(
+  runId: string,
+  options: { apiUrl?: string } = {},
+): Promise<unknown> {
+  const apiUrl = resolveApiUrl(options.apiUrl);
+
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl}/runs/${runId}`, {
+      headers: { 'Accept': 'application/json' },
+    });
+  } catch (err) {
+    throw new FlowWalkerError(
+      ErrorCodes.COMMAND_FAILED,
+      `Failed to connect to ${apiUrl}: ${err instanceof Error ? err.message : String(err)}`,
+      'Check your network or set FLOW_WALKER_API_URL',
+    );
+  }
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new FlowWalkerError(
+        ErrorCodes.FILE_NOT_FOUND,
+        `Run ${runId} not found`,
+        'Check the run ID or push the run first: flow-walker push <run-dir>',
+      );
+    }
+    throw new FlowWalkerError(
+      ErrorCodes.COMMAND_FAILED,
+      `Failed to fetch run (HTTP ${response.status})`,
+      'Try again or check FLOW_WALKER_API_URL',
+    );
+  }
+
+  return response.json();
 }

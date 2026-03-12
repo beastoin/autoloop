@@ -11,11 +11,12 @@ Do not edit this repo directly — add a new phase program in autoloop instead.
 `flow-walker` is a Node.js CLI that auto-explores Flutter apps, executes YAML test flows, and generates HTML reports.
 It builds on [agent-flutter](https://github.com/beastoin/agent-flutter) for all device interaction.
 
-**Five commands:**
+**Six commands:**
 - `walk` — BFS-explore the app, discover screens, generate YAML flows
 - `run` — Execute a YAML flow, produce run.json + video + screenshots
 - `report` — Generate self-contained HTML report from run results
 - `push` — Upload report to hosted service, return shareable URL
+- `get` — Fetch run data from hosted service by run ID
 - `schema` — Machine-readable command introspection
 
 **Design principles:**

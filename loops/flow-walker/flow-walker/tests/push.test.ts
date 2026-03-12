@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { pushReport } from '../src/push.ts';
+import { pushReport, getRunData } from '../src/push.ts';
 
 describe('pushReport', () => {
   let tempDir: string;
@@ -151,6 +151,16 @@ describe('pushReport', () => {
     // Will fail on network — but confirms metadata extraction doesn't throw
     await assert.rejects(
       () => pushReport(tempDir, { apiUrl: 'http://127.0.0.1:1' }),
+      (err: Error & { code?: string }) => {
+        assert.equal(err.code, 'COMMAND_FAILED');
+        return true;
+      },
+    );
+  });
+
+  it('getRunData throws COMMAND_FAILED on network error', async () => {
+    await assert.rejects(
+      () => getRunData('testRunId1', { apiUrl: 'http://127.0.0.1:1' }),
       (err: Error & { code?: string }) => {
         assert.equal(err.code, 'COMMAND_FAILED');
         return true;
