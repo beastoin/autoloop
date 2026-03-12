@@ -21,6 +21,7 @@ interface Stats {
   totalBytes: number;
   totalSteps: number;
   totalStepsPass: number;
+  totalDuration: number;
   lastPushAt: string;
   recentRuns: RecentRun[];
 }
@@ -52,7 +53,7 @@ function isRateLimited(ip: string): boolean {
 }
 
 function emptyStats(): Stats {
-  return { totalReports: 0, totalBytes: 0, totalSteps: 0, totalStepsPass: 0, lastPushAt: '', recentRuns: [] };
+  return { totalReports: 0, totalBytes: 0, totalSteps: 0, totalStepsPass: 0, totalDuration: 0, lastPushAt: '', recentRuns: [] };
 }
 
 async function loadStats(env: Env): Promise<Stats> {
@@ -73,6 +74,7 @@ async function updateStats(env: Env, run: RecentRun): Promise<void> {
   stats.totalBytes += run.sizeBytes;
   if (run.stepsTotal) stats.totalSteps += run.stepsTotal;
   if (run.stepsPass) stats.totalStepsPass += run.stepsPass;
+  if (run.duration) stats.totalDuration += run.duration;
   stats.lastPushAt = run.uploadedAt;
   // Deduplicate: remove older entry with same ID, keep latest
   stats.recentRuns = stats.recentRuns.filter((r) => r.id !== run.id);
@@ -422,6 +424,8 @@ function buildLandingPage(stats: Stats, baseUrl: string): string {
   }
   .metric .value { font-size: 1.8rem; font-weight: 700; color: #fff; }
   .metric .label { font-size: 0.75rem; color: #888; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .metric.highlight { border-color: #2a4a2a; background: #0d1f0d; }
+  .metric.highlight .value { color: #6ee7b7; }
 
   /* Try it */
   .tryit { padding: 36px 0; }
@@ -496,6 +500,10 @@ function buildLandingPage(stats: Stats, baseUrl: string): string {
   </section>
 
   <section class="metrics">
+    <div class="metric highlight">
+      <div class="value">${stats.totalDuration ? formatDuration(stats.totalDuration) : '—'}</div>
+      <div class="label">Time automated</div>
+    </div>
     <div class="metric">
       <div class="value">${stats.totalSteps || '—'}</div>
       <div class="label">Steps executed</div>
