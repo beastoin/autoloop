@@ -20,6 +20,7 @@ Options:
   --agent-flutter-path    Path to agent-flutter binary (default: agent-flutter)
   --json                  Machine-readable progress output
   --dry-run               Snapshot and plan without pressing
+  --skip-connect          Use existing agent-flutter session (don't reconnect)
   --help                  Show this help
 `);
 }
@@ -36,6 +37,7 @@ async function main(): Promise<void> {
       'agent-flutter-path': { type: 'string', default: 'agent-flutter' },
       'json': { type: 'boolean', default: false },
       'dry-run': { type: 'boolean', default: false },
+      'skip-connect': { type: 'boolean', default: false },
       'help': { type: 'boolean', default: false },
     },
   });
@@ -45,8 +47,8 @@ async function main(): Promise<void> {
     process.exit(positionals[0] === 'walk' ? 1 : 0);
   }
 
-  if (!values['app-uri'] && !values['bundle-id']) {
-    console.error('Error: either --app-uri or --bundle-id is required');
+  if (!values['app-uri'] && !values['bundle-id'] && !values['skip-connect']) {
+    console.error('Error: either --app-uri, --bundle-id, or --skip-connect is required');
     process.exit(2);
   }
 
@@ -58,6 +60,7 @@ async function main(): Promise<void> {
     blocklist: values['blocklist']!.split(',').map(s => s.trim()),
     json: values['json']!,
     dryRun: values['dry-run']!,
+    skipConnect: values['skip-connect']!,
     agentFlutterPath: values['agent-flutter-path']!,
   };
 

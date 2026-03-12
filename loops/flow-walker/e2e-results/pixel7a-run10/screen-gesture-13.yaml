@@ -1,0 +1,21 @@
+# E2E Flow: screen-gesture-13
+
+name: screen-gesture-13
+description: screen-gesture-24 → screen-gesture-13 navigation flow
+setup: normal
+
+steps:
+  - name: Verify screen-gesture-24
+    assert:
+      interactive_count: { min: 22 }
+    screenshot: screen-gesture-24
+  - name: Press button
+    press: { type: button }
+    screenshot: screen-gesture-13
+  - name: Verify screen-gesture-13
+    assert:
+      interactive_count: { min: 11 }
+  - name: Back to screen-gesture-24
+    back: true
+    assert:
+      interactive_count: { min: 22 }

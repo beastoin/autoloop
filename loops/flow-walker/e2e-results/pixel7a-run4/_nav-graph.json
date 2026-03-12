@@ -1,0 +1,71 @@
+{
+  "nodes": [
+    {
+      "id": "92a58e321064",
+      "name": "screen-gesture-24",
+      "elementTypes": [
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "IconButton",
+        "IconButton",
+        "IconButton",
+        "InkWell",
+        "InkWell",
+        "InkWell",
+        "InkWell"
+      ],
+      "elementCount": 24,
+      "firstSeen": 1773226517545,
+      "visits": 1
+    },
+    {
+      "id": "011f78c61152",
+      "name": "screen-gesture-14",
+      "elementTypes": [
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "GestureDetector",
+        "IconButton",
+        "InkWell",
+        "Switch",
+        "TextButton"
+      ],
+      "elementCount": 14,
+      "firstSeen": 1773226526071,
+      "visits": 1
+    }
+  ],
+  "edges": [
+    {
+      "source": "92a58e321064",
+      "target": "011f78c61152",
+      "element": {
+        "ref": "e1",
+        "type": "gesture",
+        "text": ""
+      }
+    }
+  ]
+}

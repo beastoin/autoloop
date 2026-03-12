@@ -68,4 +68,5 @@ export interface WalkerConfig {
   json: boolean;
   dryRun: boolean;
   agentFlutterPath: string;
+  skipConnect: boolean;
 }
