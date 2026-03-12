@@ -744,6 +744,22 @@ var init_adb = __esm({
         }
         return 2.625;
       }
+      ensureAccessibility() {
+        try {
+          const current = this.exec("shell settings get secure accessibility_enabled", { timeout: 3e3 });
+          if (current.trim() === "1") return;
+        } catch {
+        }
+        try {
+          this.exec(
+            "shell settings put secure enabled_accessibility_services com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService",
+            { timeout: 5e3 }
+          );
+          this.exec("shell settings put secure accessibility_enabled 1", { timeout: 3e3 });
+          this.exec("shell sleep 0.5", { timeout: 3e3 });
+        } catch {
+        }
+      }
       dumpText() {
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
@@ -1006,6 +1022,8 @@ end tell'`, { encoding: "utf8", timeout: 5e3, stdio: ["pipe", "pipe", "pipe"] })
         if (dt.includes("iPhone-SE") || dt.includes("iPhone-8")) return 2;
         if (dt.includes("iPad-mini") || dt.includes("iPad-Air-2")) return 2;
         return 3;
+      }
+      ensureAccessibility() {
       }
       dumpText() {
         return [];
@@ -2230,8 +2248,10 @@ async function textCommand(args) {
   let method = "uiautomator";
   let uiEntries = [];
   let semEntries = [];
+  const transport = resolveTransport();
   const session = loadSession();
   if (session) {
+    transport.ensureAccessibility();
     const result = await trySemantics(session.vmServiceUri);
     if (result) {
       texts = result.texts;
@@ -2240,7 +2260,6 @@ async function textCommand(args) {
     }
   }
   if (texts.length === 0) {
-    const transport = resolveTransport();
     if (transport.platform === "android") {
       uiEntries = transport.dumpText();
       if (uiEntries.length > 0) {

@@ -45,8 +45,11 @@ export async function textCommand(args: string[]): Promise<void> {
   let semEntries: SemanticsTextEntry[] = [];
 
   // Phase 1: Try semantics first when session is active (fast, works on animated pages)
+  const transport = resolveTransport();
   const session = loadSession();
   if (session) {
+    // Ensure accessibility service is active so Flutter generates semantics tree
+    transport.ensureAccessibility();
     const result = await trySemantics(session.vmServiceUri);
     if (result) {
       texts = result.texts;
@@ -57,7 +60,6 @@ export async function textCommand(args: string[]): Promise<void> {
 
   // Phase 2: Fall back to UIAutomator if semantics unavailable or empty
   if (texts.length === 0) {
-    const transport = resolveTransport();
     if (transport.platform === 'android') {
       uiEntries = transport.dumpText();
       if (uiEntries.length > 0) {
