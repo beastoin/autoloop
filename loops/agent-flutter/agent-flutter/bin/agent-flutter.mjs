@@ -139,6 +139,37 @@ var init_vm_client = __esm({
         });
         return response.result?.logs ?? [];
       }
+      /**
+       * Call any registered Flutter service extension on the current isolate.
+       * Works for Marionette extensions AND built-in Flutter extensions
+       * (e.g. ext.flutter.debugDumpSemanticsTreeInTraversalOrder).
+       */
+      async callExtension(method, params) {
+        this.ensureConnected();
+        const response = await this.call(method, {
+          isolateId: this.isolateId,
+          ...params
+        });
+        return response.result ?? {};
+      }
+      /**
+       * Dump the Flutter semantics tree in traversal order.
+       * Uses the built-in ext.flutter.debugDumpSemanticsTreeInTraversalOrder extension.
+       * Returns the text dump, or null if unavailable.
+       *
+       * This bypasses UIAutomator entirely — works on animated pages where
+       * UIAutomator's waitForIdle() never completes.
+       */
+      async dumpSemanticsTree() {
+        try {
+          const result = await this.callExtension("ext.flutter.debugDumpSemanticsTreeInTraversalOrder");
+          const data = result.data;
+          if (typeof data === "string" && data.length > 0) return data;
+          return null;
+        } catch {
+          return null;
+        }
+      }
       async takeScreenshot() {
         this.ensureConnected();
         const response = await this.call("ext.flutter.marionette.takeScreenshots", {
@@ -2146,6 +2177,42 @@ Options:
   }
 });
 
+// src/semantics-parser.ts
+function parseSemanticsTree(dump) {
+  const entries = [];
+  const sources = ["label", "value", "tooltip", "hint"];
+  for (const source of sources) {
+    const regex = new RegExp(`\\b${source}:\\s*"((?:[^"\\\\]|\\\\.)*)"`, "g");
+    let match;
+    while ((match = regex.exec(dump)) !== null) {
+      const text = match[1].replace(/\\"/g, '"').replace(/\\n/g, "\n").replace(/\\\\/g, "\\").trim();
+      if (text.length > 0) {
+        entries.push({ text, source });
+      }
+    }
+  }
+  return entries;
+}
+function extractSemanticsTexts(entries) {
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const entry of entries) {
+    const parts = entry.text.split("\n").map((s) => s.trim()).filter(Boolean);
+    for (const part of parts) {
+      if (!seen.has(part)) {
+        seen.add(part);
+        result.push(part);
+      }
+    }
+  }
+  return result;
+}
+var init_semantics_parser = __esm({
+  "src/semantics-parser.ts"() {
+    "use strict";
+  }
+});
+
 // src/commands/text.ts
 var text_exports = {};
 __export(text_exports, {
@@ -2160,23 +2227,31 @@ async function textCommand(args) {
   const isAll = args.includes("--all");
   const query = args.filter((a) => !a.startsWith("--")).join(" ").trim() || null;
   const transport = resolveTransport();
-  if (transport.platform === "ios") {
-    if (isJson) {
-      console.log(JSON.stringify(query ? { found: false, matches: [] } : []));
-    } else {
-      console.log("(text extraction not available on iOS \u2014 UIAutomator is Android-only)");
-    }
-    if (query) process.exit(1);
-    return;
+  let uiEntries = [];
+  if (transport.platform === "android") {
+    uiEntries = transport.dumpText();
   }
-  const entries = transport.dumpText();
+  let texts;
+  let method = "uiautomator";
+  let semEntries = [];
+  if (uiEntries.length > 0) {
+    texts = extractVisibleTexts(uiEntries);
+  } else {
+    const fallback = await trySemanticsFallback();
+    if (fallback) {
+      texts = fallback.texts;
+      semEntries = fallback.entries;
+      method = "semantics";
+    } else {
+      texts = [];
+    }
+  }
   if (query) {
-    const texts = extractVisibleTexts(entries);
     const lowerQuery = query.toLowerCase();
     const matches = texts.filter((t) => t.toLowerCase().includes(lowerQuery));
     const found = matches.length > 0;
     if (isJson) {
-      console.log(JSON.stringify({ found, matches }));
+      console.log(JSON.stringify({ found, matches, method }));
     } else {
       if (found) {
         console.log(`Found: ${matches.join(", ")}`);
@@ -2189,15 +2264,46 @@ async function textCommand(args) {
   }
   if (isJson) {
     if (isAll) {
-      console.log(JSON.stringify(entries));
+      if (method === "uiautomator") {
+        console.log(JSON.stringify({ method, entries: uiEntries }));
+      } else {
+        console.log(JSON.stringify({ method, entries: semEntries }));
+      }
     } else {
-      const texts = extractVisibleTexts(entries);
       console.log(JSON.stringify(texts));
     }
   } else {
-    const texts = extractVisibleTexts(entries);
+    if (method === "semantics" && texts.length > 0) {
+      console.log("(via Flutter semantics tree)");
+    }
+    if (texts.length === 0) {
+      console.log("(no text found \u2014 is a Flutter app running with an active session?)");
+    }
     for (const t of texts) {
       console.log(t);
+    }
+  }
+}
+async function trySemanticsFallback() {
+  const session = loadSession();
+  if (!session) return null;
+  let client = null;
+  try {
+    client = new VmServiceClient();
+    await client.connect(session.vmServiceUri);
+    const dump = await client.dumpSemanticsTree();
+    if (!dump) return null;
+    const entries = parseSemanticsTree(dump);
+    const texts = extractSemanticsTexts(entries);
+    return texts.length > 0 ? { texts, entries } : null;
+  } catch {
+    return null;
+  } finally {
+    if (client) {
+      try {
+        await client.disconnect();
+      } catch {
+      }
     }
   }
 }
@@ -2207,14 +2313,21 @@ var init_text = __esm({
     "use strict";
     init_transport();
     init_text_parser();
+    init_semantics_parser();
+    init_session();
+    init_vm_client();
     HELP14 = `Usage: agent-flutter text [query] [options]
 
-  List all visible text on screen (via Android UIAutomator).
+  List all visible text on screen.
   With query: check if text is visible (exit 0=found, 1=not found).
+
+  Sources (tried in order):
+    1. UIAutomator accessibility dump (Android, no session needed)
+    2. Flutter semantics tree (any platform, needs active session)
 
   Options:
     --json    JSON output
-    --all     Include source/class/bounds metadata (with --json)`;
+    --all     Include source/metadata (with --json)`;
   }
 });
 
@@ -2693,11 +2806,11 @@ var COMMAND_SCHEMAS = [
   },
   {
     name: "text",
-    description: "Extract visible text from Android accessibility layer (UIAutomator)",
+    description: "Extract visible text (UIAutomator \u2192 Flutter semantics fallback)",
     args: [{ name: "query", required: false, description: "Text to search for (substring, case-insensitive)" }],
     flags: [
-      { name: "--json", description: "JSON output" },
-      { name: "--all", description: "Include source, class, bounds metadata (with --json)" }
+      { name: "--json", description: "JSON output (includes method field: uiautomator or semantics)" },
+      { name: "--all", description: "Include source metadata (with --json)" }
     ],
     exitCodes: { "0": "success (or text found)", "1": "text not found (search mode)", "2": "error" },
     examples: [
