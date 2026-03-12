@@ -71,6 +71,8 @@ async function updateStats(env: Env, run: RecentRun): Promise<void> {
   if (run.stepsTotal) stats.totalSteps += run.stepsTotal;
   if (run.stepsPass) stats.totalStepsPass += run.stepsPass;
   stats.lastPushAt = run.uploadedAt;
+  // Deduplicate: remove older entry with same ID, keep latest
+  stats.recentRuns = stats.recentRuns.filter((r) => r.id !== run.id);
   stats.recentRuns.unshift(run);
   if (stats.recentRuns.length > MAX_RECENT_RUNS) {
     stats.recentRuns = stats.recentRuns.slice(0, MAX_RECENT_RUNS);
@@ -109,6 +111,12 @@ export default {
     // GET / — landing page
     if (request.method === 'GET' && url.pathname === '/') {
       return handleLandingPage(request, env);
+    }
+
+    // GET /api/stats/reset — clear stale entries (admin, no auth needed for v1)
+    if (request.method === 'POST' && url.pathname === '/api/stats/reset') {
+      await env.BUCKET.delete(STATS_KEY);
+      return Response.json({ ok: true }, { headers: CORS_HEADERS });
     }
 
     return Response.json(
@@ -187,7 +195,7 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
     });
   } catch { /* stats update failure should not break push */ }
 
-  const baseUrl = new URL(request.url).origin;
+  const baseUrl = getBaseUrl(request);
   const reportUrl = `${baseUrl}/runs/${runId}`;
 
   return Response.json(
@@ -229,7 +237,7 @@ async function handleGetReport(runId: string, env: Env): Promise<Response> {
 
 async function handleLandingPage(request: Request, env: Env): Promise<Response> {
   const stats = await loadStats(env);
-  const baseUrl = new URL(request.url).origin;
+  const baseUrl = getBaseUrl(request);
   const html = buildLandingPage(stats, baseUrl);
   return new Response(html, {
     headers: {
@@ -238,6 +246,13 @@ async function handleLandingPage(request: Request, env: Env): Promise<Response> 
       ...CORS_HEADERS,
     },
   });
+}
+
+function getBaseUrl(request: Request): string {
+  const url = new URL(request.url);
+  // Always use HTTPS for workers.dev
+  const protocol = url.hostname.endsWith('.workers.dev') ? 'https:' : url.protocol;
+  return `${protocol}//${url.host}`;
 }
 
 function formatBytes(bytes: number): string {
@@ -415,7 +430,7 @@ function buildLandingPage(stats: Stats, baseUrl: string): string {
       <div><span class="out">&rarr; discovered 26 screens, 44 edges in 4 minutes</span></div>
       <br>
       <div><span class="prompt">$ </span><span class="cmd">flow-walker run flows/tab-navigation.yaml</span></div>
-      <div><span class="out">&rarr; 4/4 steps pass (8.9s)</span></div>
+      <div><span class="out">&rarr; 6/6 steps pass (14.2s)</span></div>
       <br>
       <div><span class="prompt">$ </span><span class="cmd">flow-walker push ./results/</span></div>
       <div><span class="out">&rarr; ${baseUrl}/runs/25h7afGwBK</span></div>
