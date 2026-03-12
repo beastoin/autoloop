@@ -90,6 +90,16 @@ export class AgentBridge {
     return this.exec(['press', ref, '--json']);
   }
 
+  /** Scroll in a direction */
+  scroll(direction: string): string {
+    return this.exec(['scroll', direction]);
+  }
+
+  /** Fill text into an element by ref */
+  fill(ref: string, text: string): string {
+    return this.exec(['fill', ref, text]);
+  }
+
   /** Navigate back */
   back(): string {
     return this.exec(['back', '--json']);

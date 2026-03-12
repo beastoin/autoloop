@@ -40,20 +40,25 @@ export interface ScreenEdge {
 /** A step in a YAML flow */
 export interface FlowStep {
   name: string;
-  press?: { type: string; hint?: string };
+  press?: { type?: string; position?: string; hint?: string; bottom_nav_tab?: number; ref?: string };
   scroll?: string;
+  fill?: { type?: string; value: string };
   back?: boolean;
   assert?: {
-    interactive_count?: { min: number };
+    interactive_count?: { min: number; verified?: string };
+    bottom_nav_tabs?: { min: number };
     text?: string;
   };
   screenshot?: string;
+  note?: string;
 }
 
 /** A complete YAML flow */
 export interface Flow {
   name: string;
   description: string;
+  covers?: string[];
+  prerequisites?: string[];
   setup: string;
   steps: FlowStep[];
 }
