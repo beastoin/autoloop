@@ -7,8 +7,9 @@ import { FlowWalkerError, ErrorCodes } from './errors.ts';
 const DEFAULT_API_URL = 'https://flow-walker.beastoin.workers.dev';
 
 export interface PushResult {
-  url: string;
   id: string;
+  url: string;
+  htmlUrl: string;
   expiresAt: string;
 }
 
@@ -114,7 +115,7 @@ export async function pushReport(
   // Upload run.json (best-effort — don't fail push if this fails)
   if (runJsonContent && result.id) {
     try {
-      await fetch(`${apiUrl}/runs/${result.id}/data`, {
+      await fetch(`${apiUrl}/runs/${result.id}.json`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: runJsonContent,

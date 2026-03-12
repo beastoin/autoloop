@@ -98,21 +98,23 @@ export default {
       return handleUpload(request, env);
     }
 
-    // GET/PUT /runs/:id/data — structured run data (JSON)
-    const dataMatch = url.pathname.match(/^\/runs\/([A-Za-z0-9_-]{6,20})\/data$/);
-    if (dataMatch) {
-      if (request.method === 'PUT') return handlePutData(request, dataMatch[1], env);
-      if (request.method === 'GET') return handleGetData(dataMatch[1], env);
+    // runs/<id>.json — structured run data (agent-first)
+    const jsonMatch = url.pathname.match(/^\/runs\/([A-Za-z0-9_-]{6,20})\.json$/);
+    if (jsonMatch) {
+      if (request.method === 'PUT') return handlePutData(request, jsonMatch[1], env);
+      if (request.method === 'GET') return handleGetData(jsonMatch[1], env);
     }
 
-    // GET /runs/:id — serve report (or JSON via Accept header)
+    // runs/<id>.html — HTML report (human)
+    const htmlMatch = url.pathname.match(/^\/runs\/([A-Za-z0-9_-]{6,20})\.html$/);
+    if (request.method === 'GET' && htmlMatch) {
+      return handleGetReport(htmlMatch[1], env);
+    }
+
+    // runs/<id> — defaults to JSON (agent-first)
     const runMatch = url.pathname.match(/^\/runs\/([A-Za-z0-9_-]{6,20})$/);
     if (request.method === 'GET' && runMatch) {
-      const accept = request.headers.get('Accept') || '';
-      if (accept.includes('application/json')) {
-        return handleGetData(runMatch[1], env);
-      }
-      return handleGetReport(runMatch[1], env);
+      return handleGetData(runMatch[1], env);
     }
 
     // GET /api/stats — raw stats JSON
@@ -211,10 +213,14 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
   } catch { /* stats update failure should not break push */ }
 
   const baseUrl = getBaseUrl(request);
-  const reportUrl = `${baseUrl}/runs/${runId}`;
 
   return Response.json(
-    { url: reportUrl, id: runId, expiresAt },
+    {
+      id: runId,
+      url: `${baseUrl}/runs/${runId}`,
+      htmlUrl: `${baseUrl}/runs/${runId}.html`,
+      expiresAt,
+    },
     { status: 201, headers: CORS_HEADERS },
   );
 }
@@ -358,7 +364,7 @@ function buildLandingPage(stats: Stats, baseUrl: string): string {
         ? `<span class="run-steps">${r.stepsPass ?? 0}/${r.stepsTotal} pass</span>`
         : '';
       return `
-        <a href="${baseUrl}/runs/${r.id}" class="run-row">
+        <a href="${baseUrl}/runs/${r.id}.html" class="run-row">
           <span class="run-label">${label}</span>
           ${stepInfo}
           <span class="run-size">${formatBytes(r.sizeBytes)}</span>

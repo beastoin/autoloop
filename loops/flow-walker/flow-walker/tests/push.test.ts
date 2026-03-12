@@ -105,9 +105,10 @@ describe('pushReport', () => {
     // by providing a mock that responds correctly
     // Since we can't easily mock fetch in node:test, we verify the error path
     // and the success path is implicitly tested by the PushResult type
-    const result = { url: 'https://example.com/runs/abc123test', id: 'abc123test', expiresAt: '2026-04-11T00:00:00Z' };
-    assert.ok(result.url);
+    const result = { id: 'abc123test', url: 'https://example.com/runs/abc123test', htmlUrl: 'https://example.com/runs/abc123test.html', expiresAt: '2026-04-11T00:00:00Z' };
     assert.ok(result.id);
+    assert.ok(result.url);
+    assert.ok(result.htmlUrl);
     assert.ok(result.expiresAt);
   });
 

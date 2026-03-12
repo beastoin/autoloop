@@ -275,8 +275,9 @@ async function handlePush(
     console.log(JSON.stringify(result));
   } else {
     console.log(`\nReport uploaded successfully.`);
-    console.log(`  URL: ${result.url}`);
-    console.log(`  ID:  ${result.id}`);
+    console.log(`  JSON: ${result.url}`);
+    console.log(`  HTML: ${result.htmlUrl}`);
+    console.log(`  ID:   ${result.id}`);
     console.log(`  Expires: ${result.expiresAt}`);
   }
 
