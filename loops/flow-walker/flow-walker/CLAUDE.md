@@ -68,6 +68,8 @@ npx tsc --noEmit            # typecheck
 | 2 | run + report: flow executor, video/screenshots, HTML viewer | eval2.sh (25 gates) |
 | 3 | Agent-grade: structured errors, schema, input hardening, run IDs | eval3.sh (41 gates) |
 | 4 | Hosted reports: push command, Cloudflare Worker + R2 | eval4.sh (17 gates) |
+| 5 | Landing page: live metrics, stats tracking | eval5.sh (14 gates) |
+| 6 | Agent-friendly run data + app metadata | eval6.sh (13 gates) |
 
 ## What not to do
 

@@ -95,6 +95,18 @@ flow-walker push ./run-output/25h7afGwBK/ --json
 
 Reports are stored for 30 days. Re-pushing the same run is idempotent — returns the same URL with updated expiry. Use `FLOW_WALKER_API_URL` env var to point at a custom server.
 
+Push also uploads `run.json` (stripped of local file paths) so AI agents can pull structured data:
+
+```bash
+# Human: browser view
+curl https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK
+
+# Agent: structured JSON
+curl -H "Accept: application/json" https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK
+# or explicit endpoint:
+curl https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK/data
+```
+
 ### `schema` — Agent discovery
 
 Machine-readable command introspection. Returns versioned JSON with args, flags (with types), exit codes, and examples.
@@ -111,6 +123,8 @@ Agents can discover capabilities programmatically — no --help parsing needed.
 ```yaml
 name: tab-navigation
 description: Bottom nav bar detection, switch between 4 tabs
+app: Omi                                    # optional: app name (shown in reports)
+app_url: https://omi.me                     # optional: app URL (linked in reports)
 covers:
   - app/lib/pages/home/page.dart
 prerequisites:
@@ -171,6 +185,8 @@ Built following [Poehnelt's CLI-for-agents principles](https://justin.poehnelt.c
 - **NDJSON streaming** — walk emits `walk:start`, `screen`, `edge`, `skip` events as one JSON per line
 - **Unique run IDs** — 10-char base64url per run, filesystem-safe, URL-safe
 - **Hosted sharing** — `flow-walker push` uploads report and returns a URL, no auth needed
+- **Agent-readable data** — `GET /runs/:id/data` returns structured run.json for AI agents
+- **App metadata** — optional `app` + `app_url` in YAML flows, shown in reports and landing page
 - **Environment variables** — `FLOW_WALKER_OUTPUT_DIR`, `FLOW_WALKER_AGENT_PATH`, `FLOW_WALKER_DRY_RUN`, `FLOW_WALKER_JSON`, `FLOW_WALKER_API_URL`
 - **Exit codes** — 0 = success, 1 = flow failure, 2 = error
 
@@ -201,6 +217,8 @@ App on device/emulator/desktop
 | 2 | run + report: flow executor, video/screenshots, HTML viewer | Complete |
 | 3 | Agent-grade: structured errors, schema, input hardening, run IDs | Complete |
 | 4 | Hosted reports: push command, Cloudflare Worker + R2 | Complete |
+| 5 | Landing page: live metrics, stats tracking | Complete |
+| 6 | Agent-friendly run data + app metadata | Complete |
 
 ## License
 

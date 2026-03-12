@@ -157,6 +157,19 @@ done
 }
 ```
 
+### Agent-readable run data
+
+After push, structured run data is available via:
+
+```bash
+# Explicit endpoint
+curl https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK/data
+# Content negotiation
+curl -H "Accept: application/json" https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK
+```
+
+Returns the same run.json structure (without local file paths like video/screenshot filenames).
+
 ### Structured error (on failure)
 
 ```json
@@ -175,6 +188,8 @@ done
 ```yaml
 name: flow-name
 description: What this flow tests
+app: Omi                          # optional: app name
+app_url: https://omi.me           # optional: app URL
 covers:
   - app/lib/pages/home.dart
 prerequisites:
