@@ -1,12 +1,9 @@
 /**
  * text [query] [--json] — Extract visible text from the running app.
  *
- * Strategy:
- * 1. UIAutomator dump (Android-only, no session needed)
- * 2. Flutter semantics tree fallback (any platform, needs active session)
- *
- * The fallback handles animated pages where UIAutomator's waitForIdle() hangs,
- * plus iOS where UIAutomator doesn't exist.
+ * Strategy (session-aware priority):
+ * 1. If session active → Flutter semantics tree first (fast ~2s, works on animated pages)
+ * 2. If no session OR semantics empty → UIAutomator dump (Android-only, no session needed)
  *
  * Exit codes: 0 = success/found, 1 = not found (search mode), 2 = error.
  */
@@ -22,9 +19,9 @@ const HELP = `Usage: agent-flutter text [query] [options]
   List all visible text on screen.
   With query: check if text is visible (exit 0=found, 1=not found).
 
-  Sources (tried in order):
-    1. UIAutomator accessibility dump (Android, no session needed)
-    2. Flutter semantics tree (any platform, needs active session)
+  Sources (session-aware priority):
+    1. Flutter semantics tree (fast, needs active session — preferred)
+    2. UIAutomator accessibility dump (Android, no session needed — fallback)
 
   Options:
     --json    JSON output
@@ -42,29 +39,31 @@ export async function textCommand(args: string[]): Promise<void> {
   // Filter out flags to get the query
   const query = args.filter(a => !a.startsWith('--')).join(' ').trim() || null;
 
-  const transport = resolveTransport();
-
-  // Phase 1: UIAutomator (Android-only, no session needed)
-  let uiEntries: TextEntry[] = [];
-  if (transport.platform === 'android') {
-    uiEntries = transport.dumpText();
-  }
-
-  // Phase 2: If UIAutomator empty, try Flutter semantics via VM Service
-  let texts: string[];
+  let texts: string[] = [];
   let method: 'uiautomator' | 'semantics' = 'uiautomator';
+  let uiEntries: TextEntry[] = [];
   let semEntries: SemanticsTextEntry[] = [];
 
-  if (uiEntries.length > 0) {
-    texts = extractVisibleTexts(uiEntries);
-  } else {
-    const fallback = await trySemanticsFallback();
-    if (fallback) {
-      texts = fallback.texts;
-      semEntries = fallback.entries;
+  // Phase 1: Try semantics first when session is active (fast, works on animated pages)
+  const session = loadSession();
+  if (session) {
+    const result = await trySemantics(session.vmServiceUri);
+    if (result) {
+      texts = result.texts;
+      semEntries = result.entries;
       method = 'semantics';
-    } else {
-      texts = [];
+    }
+  }
+
+  // Phase 2: Fall back to UIAutomator if semantics unavailable or empty
+  if (texts.length === 0) {
+    const transport = resolveTransport();
+    if (transport.platform === 'android') {
+      uiEntries = transport.dumpText();
+      if (uiEntries.length > 0) {
+        texts = extractVisibleTexts(uiEntries);
+        method = 'uiautomator';
+      }
     }
   }
 
@@ -112,14 +111,11 @@ export async function textCommand(args: string[]): Promise<void> {
   }
 }
 
-async function trySemanticsFallback(): Promise<{ texts: string[]; entries: SemanticsTextEntry[] } | null> {
-  const session = loadSession();
-  if (!session) return null;
-
+async function trySemantics(vmServiceUri: string): Promise<{ texts: string[]; entries: SemanticsTextEntry[] } | null> {
   let client: VmServiceClient | null = null;
   try {
     client = new VmServiceClient();
-    await client.connect(session.vmServiceUri);
+    await client.connect(vmServiceUri);
     const dump = await client.dumpSemanticsTree();
     if (!dump) return null;
     const entries = parseSemanticsTree(dump);

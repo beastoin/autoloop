@@ -2226,24 +2226,27 @@ async function textCommand(args) {
   const isJson = args.includes("--json") || process.env.AGENT_FLUTTER_JSON === "1";
   const isAll = args.includes("--all");
   const query = args.filter((a) => !a.startsWith("--")).join(" ").trim() || null;
-  const transport = resolveTransport();
-  let uiEntries = [];
-  if (transport.platform === "android") {
-    uiEntries = transport.dumpText();
-  }
-  let texts;
+  let texts = [];
   let method = "uiautomator";
+  let uiEntries = [];
   let semEntries = [];
-  if (uiEntries.length > 0) {
-    texts = extractVisibleTexts(uiEntries);
-  } else {
-    const fallback = await trySemanticsFallback();
-    if (fallback) {
-      texts = fallback.texts;
-      semEntries = fallback.entries;
+  const session = loadSession();
+  if (session) {
+    const result = await trySemantics(session.vmServiceUri);
+    if (result) {
+      texts = result.texts;
+      semEntries = result.entries;
       method = "semantics";
-    } else {
-      texts = [];
+    }
+  }
+  if (texts.length === 0) {
+    const transport = resolveTransport();
+    if (transport.platform === "android") {
+      uiEntries = transport.dumpText();
+      if (uiEntries.length > 0) {
+        texts = extractVisibleTexts(uiEntries);
+        method = "uiautomator";
+      }
     }
   }
   if (query) {
@@ -2284,13 +2287,11 @@ async function textCommand(args) {
     }
   }
 }
-async function trySemanticsFallback() {
-  const session = loadSession();
-  if (!session) return null;
+async function trySemantics(vmServiceUri) {
   let client = null;
   try {
     client = new VmServiceClient();
-    await client.connect(session.vmServiceUri);
+    await client.connect(vmServiceUri);
     const dump = await client.dumpSemanticsTree();
     if (!dump) return null;
     const entries = parseSemanticsTree(dump);
@@ -2321,9 +2322,9 @@ var init_text = __esm({
   List all visible text on screen.
   With query: check if text is visible (exit 0=found, 1=not found).
 
-  Sources (tried in order):
-    1. UIAutomator accessibility dump (Android, no session needed)
-    2. Flutter semantics tree (any platform, needs active session)
+  Sources (session-aware priority):
+    1. Flutter semantics tree (fast, needs active session \u2014 preferred)
+    2. UIAutomator accessibility dump (Android, no session needed \u2014 fallback)
 
   Options:
     --json    JSON output
