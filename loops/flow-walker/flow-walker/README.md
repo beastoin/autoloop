@@ -95,16 +95,15 @@ flow-walker push ./run-output/25h7afGwBK/ --json
 
 Reports are stored for 30 days. Re-pushing the same run is idempotent — returns the same URL with updated expiry. Use `FLOW_WALKER_API_URL` env var to point at a custom server.
 
-Push also uploads `run.json` (stripped of local file paths) so AI agents can pull structured data:
+Push also uploads `run.json` (stripped of local file paths). URL scheme is agent-first:
 
 ```bash
-# Human: browser view
+# Agent: JSON by default
 curl https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK
+curl https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK.json
 
-# Agent: structured JSON
-curl -H "Accept: application/json" https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK
-# or explicit endpoint:
-curl https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK/data
+# Human: HTML report
+open https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK.html
 ```
 
 ### `schema` — Agent discovery
@@ -185,7 +184,7 @@ Built following [Poehnelt's CLI-for-agents principles](https://justin.poehnelt.c
 - **NDJSON streaming** — walk emits `walk:start`, `screen`, `edge`, `skip` events as one JSON per line
 - **Unique run IDs** — 10-char base64url per run, filesystem-safe, URL-safe
 - **Hosted sharing** — `flow-walker push` uploads report and returns a URL, no auth needed
-- **Agent-readable data** — `GET /runs/:id/data` returns structured run.json for AI agents
+- **Agent-first URLs** — `/runs/:id` defaults to JSON; `.html` suffix for humans
 - **App metadata** — optional `app` + `app_url` in YAML flows, shown in reports and landing page
 - **Environment variables** — `FLOW_WALKER_OUTPUT_DIR`, `FLOW_WALKER_AGENT_PATH`, `FLOW_WALKER_DRY_RUN`, `FLOW_WALKER_JSON`, `FLOW_WALKER_API_URL`
 - **Exit codes** — 0 = success, 1 = flow failure, 2 = error

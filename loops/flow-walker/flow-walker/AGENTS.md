@@ -159,16 +159,18 @@ done
 
 ### Agent-readable run data
 
-After push, structured run data is available via:
+After push, structured run data is available. URLs are agent-first — JSON by default:
 
 ```bash
-# Explicit endpoint
-curl https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK/data
-# Content negotiation
-curl -H "Accept: application/json" https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK
+# JSON (default) — for agents
+curl https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK
+curl https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK.json
+
+# HTML — for humans
+open https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK.html
 ```
 
-Returns the same run.json structure (without local file paths like video/screenshot filenames).
+Returns run.json structure (without local file paths like video/screenshot filenames).
 
 ### Structured error (on failure)
 
