@@ -4,17 +4,28 @@ interface Env {
   BUCKET: R2Bucket;
 }
 
+interface RecentRun {
+  id: string;
+  uploadedAt: string;
+  sizeBytes: number;
+  flowName?: string;
+  stepsTotal?: number;
+  stepsPass?: number;
+}
+
 interface Stats {
   totalReports: number;
   totalBytes: number;
+  totalSteps: number;
+  totalStepsPass: number;
   lastPushAt: string;
-  recentRuns: { id: string; uploadedAt: string; sizeBytes: number }[];
+  recentRuns: RecentRun[];
 }
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, X-Run-ID, X-Flow-Name, X-Steps-Total, X-Steps-Pass',
 };
 
 const TTL_DAYS = 30;
@@ -37,24 +48,30 @@ function isRateLimited(ip: string): boolean {
   return entry.count > RATE_LIMIT_PER_DAY;
 }
 
+function emptyStats(): Stats {
+  return { totalReports: 0, totalBytes: 0, totalSteps: 0, totalStepsPass: 0, lastPushAt: '', recentRuns: [] };
+}
+
 async function loadStats(env: Env): Promise<Stats> {
   const obj = await env.BUCKET.get(STATS_KEY);
-  if (!obj) {
-    return { totalReports: 0, totalBytes: 0, lastPushAt: '', recentRuns: [] };
-  }
+  if (!obj) return emptyStats();
   try {
-    return await obj.json<Stats>();
+    const raw = await obj.json<Stats>();
+    // Backfill fields added after initial deploy
+    return { ...emptyStats(), ...raw };
   } catch {
-    return { totalReports: 0, totalBytes: 0, lastPushAt: '', recentRuns: [] };
+    return emptyStats();
   }
 }
 
-async function updateStats(env: Env, runId: string, sizeBytes: number): Promise<void> {
+async function updateStats(env: Env, run: RecentRun): Promise<void> {
   const stats = await loadStats(env);
   stats.totalReports++;
-  stats.totalBytes += sizeBytes;
-  stats.lastPushAt = new Date().toISOString();
-  stats.recentRuns.unshift({ id: runId, uploadedAt: stats.lastPushAt, sizeBytes });
+  stats.totalBytes += run.sizeBytes;
+  if (run.stepsTotal) stats.totalSteps += run.stepsTotal;
+  if (run.stepsPass) stats.totalStepsPass += run.stepsPass;
+  stats.lastPushAt = run.uploadedAt;
+  stats.recentRuns.unshift(run);
   if (stats.recentRuns.length > MAX_RECENT_RUNS) {
     stats.recentRuns = stats.recentRuns.slice(0, MAX_RECENT_RUNS);
   }
@@ -138,6 +155,11 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
     );
   }
 
+  // Read optional flow metadata headers
+  const flowName = request.headers.get('X-Flow-Name') || undefined;
+  const stepsTotal = parseInt(request.headers.get('X-Steps-Total') || '', 10) || undefined;
+  const stepsPass = parseInt(request.headers.get('X-Steps-Pass') || '', 10) || undefined;
+
   // Read body
   const body = await request.arrayBuffer();
   if (body.byteLength === 0) {
@@ -150,15 +172,19 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
   // Store in R2
   const key = `runs/${runId}/report.html`;
   const expiresAt = new Date(Date.now() + TTL_DAYS * 86400000).toISOString();
+  const uploadedAt = new Date().toISOString();
 
   await env.BUCKET.put(key, body, {
     httpMetadata: { contentType: 'text/html; charset=utf-8' },
-    customMetadata: { expiresAt, uploadedAt: new Date().toISOString() },
+    customMetadata: { expiresAt, uploadedAt, ...(flowName ? { flowName } : {}) },
   });
 
   // Update stats (best-effort — don't block the response on failure)
   try {
-    await updateStats(env, runId, body.byteLength);
+    await updateStats(env, {
+      id: runId, uploadedAt, sizeBytes: body.byteLength,
+      flowName, stepsTotal, stepsPass,
+    });
   } catch { /* stats update failure should not break push */ }
 
   const baseUrl = new URL(request.url).origin;
@@ -234,16 +260,30 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
+function passRate(total: number, pass: number): string {
+  if (total === 0) return '—';
+  return `${((pass / total) * 100).toFixed(1)}%`;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 function buildLandingPage(stats: Stats, baseUrl: string): string {
   const recentRows = stats.recentRuns
-    .map(
-      (r) => `
+    .map((r) => {
+      const label = r.flowName ? escapeHtml(r.flowName) : r.id;
+      const stepInfo = r.stepsTotal
+        ? `<span class="run-steps">${r.stepsPass ?? 0}/${r.stepsTotal} pass</span>`
+        : '';
+      return `
         <a href="${baseUrl}/runs/${r.id}" class="run-row">
-          <span class="run-id">${r.id}</span>
+          <span class="run-label">${label}</span>
+          ${stepInfo}
           <span class="run-size">${formatBytes(r.sizeBytes)}</span>
           <span class="run-time">${timeAgo(r.uploadedAt)}</span>
-        </a>`,
-    )
+        </a>`;
+    })
     .join('');
 
   return `<!DOCTYPE html>
@@ -251,7 +291,7 @@ function buildLandingPage(stats: Stats, baseUrl: string): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>flow-walker — Map your app. Run your flows. Share results.</title>
+<title>flow-walker — Map your app in minutes. Zero test code.</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -261,66 +301,82 @@ function buildLandingPage(stats: Stats, baseUrl: string): string {
   }
   a { color: #6ee7b7; text-decoration: none; }
   a:hover { text-decoration: underline; }
+  code { font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, monospace; }
 
   .container { max-width: 720px; margin: 0 auto; padding: 0 24px; }
 
   /* Hero */
-  .hero { padding: 80px 0 48px; text-align: center; }
+  .hero { padding: 80px 0 24px; text-align: center; }
   .hero h1 { font-size: 2rem; font-weight: 700; color: #fff; margin-bottom: 12px; }
-  .hero p { font-size: 1.1rem; color: #a0a0a0; max-width: 480px; margin: 0 auto 32px; }
-  .hero code {
+  .hero p { font-size: 1.05rem; color: #a0a0a0; max-width: 520px; margin: 0 auto 28px; }
+  .install {
     display: inline-block; background: #1a1a2e; border: 1px solid #333;
-    border-radius: 6px; padding: 8px 20px; font-size: 0.95rem; color: #6ee7b7;
+    border-radius: 6px; padding: 10px 24px; font-size: 0.95rem; color: #6ee7b7;
+    cursor: pointer; position: relative;
   }
+  .install:hover { border-color: #6ee7b7; }
 
   /* Metrics strip */
-  .metrics { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; padding: 32px 0; }
+  .metrics { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; padding: 36px 0; }
   .metric {
     background: #111; border: 1px solid #222; border-radius: 8px;
-    padding: 20px 28px; text-align: center; min-width: 140px; flex: 1; max-width: 200px;
+    padding: 20px 24px; text-align: center; min-width: 130px; flex: 1; max-width: 180px;
   }
   .metric .value { font-size: 1.8rem; font-weight: 700; color: #fff; }
-  .metric .label { font-size: 0.8rem; color: #888; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .metric .label { font-size: 0.75rem; color: #888; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* Try it */
+  .tryit { padding: 36px 0; }
+  .tryit h2 { font-size: 1.2rem; color: #fff; margin-bottom: 16px; text-align: center; }
+  .terminal {
+    background: #111; border: 1px solid #222; border-radius: 8px;
+    padding: 20px 24px; font-size: 0.85rem; line-height: 1.8;
+  }
+  .terminal .prompt { color: #888; }
+  .terminal .cmd { color: #6ee7b7; }
+  .terminal .out { color: #a0a0a0; }
 
   /* Pipeline */
-  .pipeline { padding: 40px 0; }
+  .pipeline { padding: 36px 0; }
   .pipeline h2 { font-size: 1.2rem; color: #fff; margin-bottom: 20px; text-align: center; }
   .steps { display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap; }
   .step {
     background: #111; border: 1px solid #222; border-radius: 6px;
     padding: 12px 16px; text-align: center; flex: 1; min-width: 120px; max-width: 160px;
   }
-  .step .cmd { font-family: monospace; font-size: 0.85rem; color: #6ee7b7; }
+  .step .cmd { font-size: 0.85rem; color: #6ee7b7; }
   .step .desc { font-size: 0.75rem; color: #888; margin-top: 4px; }
   .arrow { color: #444; font-size: 1.2rem; }
 
   /* Recent runs */
-  .recent { padding: 40px 0; }
+  .recent { padding: 36px 0; }
   .recent h2 { font-size: 1.2rem; color: #fff; margin-bottom: 16px; text-align: center; }
   .run-row {
     display: flex; justify-content: space-between; align-items: center;
     padding: 10px 16px; border-bottom: 1px solid #1a1a1a; color: #e0e0e0;
-    transition: background 0.15s;
+    transition: background 0.15s; gap: 12px;
   }
   .run-row:hover { background: #111; text-decoration: none; }
-  .run-id { font-family: monospace; color: #6ee7b7; font-size: 0.9rem; }
-  .run-size { color: #888; font-size: 0.85rem; }
-  .run-time { color: #666; font-size: 0.85rem; min-width: 60px; text-align: right; }
+  .run-label { color: #6ee7b7; font-size: 0.9rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .run-steps { color: #a0a0a0; font-size: 0.8rem; white-space: nowrap; }
+  .run-size { color: #666; font-size: 0.8rem; white-space: nowrap; }
+  .run-time { color: #555; font-size: 0.8rem; min-width: 50px; text-align: right; white-space: nowrap; }
   .empty { text-align: center; color: #555; padding: 32px 0; font-size: 0.9rem; }
 
   /* Footer */
   .footer {
-    padding: 48px 0 32px; text-align: center; border-top: 1px solid #1a1a1a; margin-top: 40px;
+    padding: 48px 0 32px; text-align: center; border-top: 1px solid #1a1a1a; margin-top: 32px;
   }
   .footer p { color: #666; font-size: 0.85rem; margin-bottom: 8px; }
-  .footer a { color: #6ee7b7; }
 
   @media (max-width: 480px) {
+    .hero { padding: 48px 0 16px; }
     .hero h1 { font-size: 1.5rem; }
-    .metric { min-width: 100px; padding: 14px 16px; }
+    .metric { min-width: 90px; padding: 14px 12px; }
     .metric .value { font-size: 1.4rem; }
     .steps { flex-direction: column; }
     .arrow { transform: rotate(90deg); }
+    .run-row { font-size: 0.85rem; gap: 8px; }
   }
 </style>
 </head>
@@ -328,46 +384,64 @@ function buildLandingPage(stats: Stats, baseUrl: string): string {
 
 <div class="container">
   <section class="hero">
-    <h1>Map your app. Run your flows. Share results.</h1>
-    <p>Auto-discover every screen, execute YAML test flows, generate self-contained HTML reports, share with one command.</p>
-    <code>npm install -g flow-walker-cli</code>
+    <h1>Map your app in minutes. Zero test code.</h1>
+    <p>Auto-discover screens, execute YAML test flows, generate self-contained reports, share with one command. Open source.</p>
+    <code class="install">npm install -g flow-walker-cli</code>
   </section>
 
   <section class="metrics">
     <div class="metric">
+      <div class="value">${stats.totalSteps || '—'}</div>
+      <div class="label">Steps executed</div>
+    </div>
+    <div class="metric">
+      <div class="value">${passRate(stats.totalSteps, stats.totalStepsPass)}</div>
+      <div class="label">Pass rate</div>
+    </div>
+    <div class="metric">
       <div class="value">${stats.totalReports}</div>
-      <div class="label">Reports pushed</div>
+      <div class="label">Reports shared</div>
     </div>
     <div class="metric">
       <div class="value">${formatBytes(stats.totalBytes)}</div>
       <div class="label">Data served</div>
     </div>
-    <div class="metric">
-      <div class="value">${stats.lastPushAt ? timeAgo(stats.lastPushAt) : '—'}</div>
-      <div class="label">Last push</div>
+  </section>
+
+  <section class="tryit">
+    <h2>See it work</h2>
+    <div class="terminal">
+      <div><span class="prompt">$ </span><span class="cmd">flow-walker walk --max-depth 2</span></div>
+      <div><span class="out">&rarr; discovered 26 screens, 44 edges in 4 minutes</span></div>
+      <br>
+      <div><span class="prompt">$ </span><span class="cmd">flow-walker run flows/tab-navigation.yaml</span></div>
+      <div><span class="out">&rarr; 4/4 steps pass (8.9s)</span></div>
+      <br>
+      <div><span class="prompt">$ </span><span class="cmd">flow-walker push ./results/</span></div>
+      <div><span class="out">&rarr; ${baseUrl}/runs/25h7afGwBK</span></div>
     </div>
   </section>
 
   <section class="pipeline">
-    <h2>3 commands. Zero config.</h2>
+    <h2>4 commands. Zero config.</h2>
     <div class="steps">
       <div class="step">
-        <div class="cmd">walk</div>
+        <div class="cmd"><code>walk</code></div>
         <div class="desc">Discover screens</div>
       </div>
-      <span class="arrow">→</span>
+      <span class="arrow">&rarr;</span>
       <div class="step">
-        <div class="cmd">run</div>
+        <div class="cmd"><code>run</code></div>
         <div class="desc">Execute + record</div>
       </div>
-      <span class="arrow">→</span>
+      <span class="arrow">&rarr;</span>
       <div class="step">
-        <div class="cmd">report</div>
+        <div class="cmd"><code>report</code></div>
         <div class="desc">Generate HTML</div>
       </div>
-      <span class="arrow">→</span>
+      <span class="arrow">&rarr;</span>
       <div class="step">
-        <div class="cmd">push</div>
+        <div class="cmd"><code>push</code></div>
         <div class="desc">Share via URL</div>
       </div>
     </div>
@@ -375,11 +449,11 @@ function buildLandingPage(stats: Stats, baseUrl: string): string {
 
   <section class="recent">
     <h2>Recent reports</h2>
-    ${recentRows || '<div class="empty">No reports yet. Be the first: flow-walker push</div>'}
+    ${recentRows || '<div class="empty">No reports yet. Be the first: <code>flow-walker push</code></div>'}
   </section>
 
   <footer class="footer">
-    <p>Open source &middot; MIT license &middot; <a href="https://github.com/beastoin/flow-walker">GitHub</a></p>
+    <p>Open source &middot; MIT &middot; <a href="https://github.com/beastoin/flow-walker">GitHub</a> &middot; <a href="${baseUrl}/api/stats">API</a></p>
     <p>Built with <a href="https://github.com/beastoin/agent-flutter">agent-flutter</a></p>
   </footer>
 </div>

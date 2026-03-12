@@ -31,16 +31,22 @@ export async function pushReport(
     );
   }
 
-  // Read run ID from run.json if available
+  // Read metadata from run.json if available
   let runId = options.runId;
-  if (!runId) {
-    const runJsonPath = join(runDir, 'run.json');
-    if (existsSync(runJsonPath)) {
-      try {
-        const runData = JSON.parse(readFileSync(runJsonPath, 'utf-8'));
-        runId = runData.id;
-      } catch { /* ignore parse errors */ }
-    }
+  let flowName: string | undefined;
+  let stepsTotal: number | undefined;
+  let stepsPass: number | undefined;
+  const runJsonPath = join(runDir, 'run.json');
+  if (existsSync(runJsonPath)) {
+    try {
+      const runData = JSON.parse(readFileSync(runJsonPath, 'utf-8'));
+      if (!runId) runId = runData.id;
+      if (runData.flow) flowName = String(runData.flow);
+      if (Array.isArray(runData.steps)) {
+        stepsTotal = runData.steps.length;
+        stepsPass = runData.steps.filter((s: { status?: string }) => s.status === 'pass').length;
+      }
+    } catch { /* ignore parse errors */ }
   }
 
   // Read report
@@ -51,9 +57,10 @@ export async function pushReport(
     'Content-Type': 'text/html',
     'Content-Length': String(reportContent.byteLength),
   };
-  if (runId) {
-    headers['X-Run-ID'] = runId;
-  }
+  if (runId) headers['X-Run-ID'] = runId;
+  if (flowName) headers['X-Flow-Name'] = flowName;
+  if (stepsTotal !== undefined) headers['X-Steps-Total'] = String(stepsTotal);
+  if (stepsPass !== undefined) headers['X-Steps-Pass'] = String(stepsPass);
 
   let response: Response;
   try {

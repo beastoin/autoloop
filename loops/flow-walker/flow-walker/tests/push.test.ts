@@ -134,6 +134,29 @@ describe('pushReport', () => {
     }
   });
 
+  it('extracts flow metadata from run.json for headers', async () => {
+    writeFileSync(join(tempDir, 'report.html'), '<html>test</html>');
+    writeFileSync(join(tempDir, 'run.json'), JSON.stringify({
+      id: 'metaTest01',
+      flow: 'tab-navigation',
+      result: 'pass',
+      steps: [
+        { index: 0, name: 'step1', status: 'pass', action: 'assert' },
+        { index: 1, name: 'step2', status: 'pass', action: 'press' },
+        { index: 2, name: 'step3', status: 'fail', action: 'assert' },
+      ],
+      duration: 5000,
+    }));
+    // Will fail on network — but confirms metadata extraction doesn't throw
+    await assert.rejects(
+      () => pushReport(tempDir, { apiUrl: 'http://127.0.0.1:1' }),
+      (err: Error & { code?: string }) => {
+        assert.equal(err.code, 'COMMAND_FAILED');
+        return true;
+      },
+    );
+  });
+
   it('reads report.html content correctly (non-empty body)', async () => {
     const htmlContent = '<html><body><h1>Test Report</h1><p>Content here</p></body></html>';
     writeFileSync(join(tempDir, 'report.html'), htmlContent);
