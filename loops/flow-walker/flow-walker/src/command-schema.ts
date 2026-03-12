@@ -165,7 +165,7 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
   },
 ];
 
-export const SCHEMA_VERSION = '0.1.0';
+export const SCHEMA_VERSION = '0.2.0';
 
 /** Get schema for a specific command */
 export function getCommandSchema(name: string): CommandSchema | undefined {

@@ -589,12 +589,75 @@ var init_errors = __esm({
   }
 });
 
+// src/text-parser.ts
+function parseUiAutomatorXml(xml) {
+  const entries = [];
+  const nodePattern = /<node\s[^>]*>/g;
+  let match;
+  while ((match = nodePattern.exec(xml)) !== null) {
+    const node = match[0];
+    const text = extractAttr(node, "text");
+    const contentDesc = extractAttr(node, "content-desc");
+    const cls = extractAttr(node, "class") ?? "";
+    const boundsStr = extractAttr(node, "bounds");
+    const bounds = parseBounds(boundsStr);
+    if (text) {
+      entries.push({ text, source: "text", class: cls, bounds });
+    }
+    if (contentDesc && contentDesc !== text) {
+      entries.push({ text: contentDesc, source: "content-desc", class: cls, bounds });
+    }
+  }
+  return entries;
+}
+function extractVisibleTexts(entries) {
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const entry of entries) {
+    const parts = entry.text.split("\n").map((s) => s.trim()).filter(Boolean);
+    for (const part of parts) {
+      if (!seen.has(part)) {
+        seen.add(part);
+        result.push(part);
+      }
+    }
+  }
+  return result;
+}
+function extractAttr(node, name) {
+  const pattern = new RegExp(`${name}="([^"]*)"`, "i");
+  const match = pattern.exec(node);
+  if (!match) return null;
+  const val = match[1].trim();
+  return val.length > 0 ? decodeXmlEntities(val) : null;
+}
+function parseBounds(boundsStr) {
+  if (!boundsStr) return [0, 0, 0, 0];
+  const match = boundsStr.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
+  if (!match) return [0, 0, 0, 0];
+  return [
+    parseInt(match[1], 10),
+    parseInt(match[2], 10),
+    parseInt(match[3], 10),
+    parseInt(match[4], 10)
+  ];
+}
+function decodeXmlEntities(s) {
+  return s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+}
+var init_text_parser = __esm({
+  "src/text-parser.ts"() {
+    "use strict";
+  }
+});
+
 // src/transport/adb.ts
 import { execSync as execSync2 } from "node:child_process";
 var AdbTransport;
 var init_adb = __esm({
   "src/transport/adb.ts"() {
     "use strict";
+    init_text_parser();
     AdbTransport = class {
       platform = "android";
       deviceId;
@@ -649,6 +712,15 @@ var init_adb = __esm({
         } catch {
         }
         return 2.625;
+      }
+      dumpText() {
+        try {
+          this.exec("shell uiautomator dump /sdcard/window_dump.xml", { timeout: 1e4 });
+          const xml = this.exec("shell cat /sdcard/window_dump.xml", { timeout: 5e3, maxBuffer: 5 * 1024 * 1024 });
+          return parseUiAutomatorXml(xml);
+        } catch {
+          return [];
+        }
       }
       detectVmServiceUri() {
         try {
@@ -894,6 +966,9 @@ end tell'`, { encoding: "utf8", timeout: 5e3, stdio: ["pipe", "pipe", "pipe"] })
         if (dt.includes("iPhone-SE") || dt.includes("iPhone-8")) return 2;
         if (dt.includes("iPad-mini") || dt.includes("iPad-Air-2")) return 2;
         return 3;
+      }
+      dumpText() {
+        return [];
       }
       detectVmServiceUri() {
         return null;
@@ -2062,6 +2137,78 @@ Options:
   }
 });
 
+// src/commands/text.ts
+var text_exports = {};
+__export(text_exports, {
+  textCommand: () => textCommand
+});
+async function textCommand(args) {
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log(HELP14);
+    return;
+  }
+  const isJson = args.includes("--json") || process.env.AGENT_FLUTTER_JSON === "1";
+  const isAll = args.includes("--all");
+  const query = args.filter((a) => !a.startsWith("--")).join(" ").trim() || null;
+  const transport = resolveTransport();
+  if (transport.platform === "ios") {
+    if (isJson) {
+      console.log(JSON.stringify(query ? { found: false, matches: [] } : []));
+    } else {
+      console.log("(text extraction not available on iOS \u2014 UIAutomator is Android-only)");
+    }
+    if (query) process.exit(1);
+    return;
+  }
+  const entries = transport.dumpText();
+  if (query) {
+    const texts = extractVisibleTexts(entries);
+    const lowerQuery = query.toLowerCase();
+    const matches = texts.filter((t) => t.toLowerCase().includes(lowerQuery));
+    const found = matches.length > 0;
+    if (isJson) {
+      console.log(JSON.stringify({ found, matches }));
+    } else {
+      if (found) {
+        console.log(`Found: ${matches.join(", ")}`);
+      } else {
+        console.log(`Not found: "${query}"`);
+      }
+    }
+    if (!found) process.exit(1);
+    return;
+  }
+  if (isJson) {
+    if (isAll) {
+      console.log(JSON.stringify(entries));
+    } else {
+      const texts = extractVisibleTexts(entries);
+      console.log(JSON.stringify(texts));
+    }
+  } else {
+    const texts = extractVisibleTexts(entries);
+    for (const t of texts) {
+      console.log(t);
+    }
+  }
+}
+var HELP14;
+var init_text = __esm({
+  "src/commands/text.ts"() {
+    "use strict";
+    init_transport();
+    init_text_parser();
+    HELP14 = `Usage: agent-flutter text [query] [options]
+
+  List all visible text on screen (via Android UIAutomator).
+  With query: check if text is visible (exit 0=found, 1=not found).
+
+  Options:
+    --json    JSON output
+    --all     Include source/class/bounds metadata (with --json)`;
+  }
+});
+
 // src/commands/doctor.ts
 var doctor_exports = {};
 __export(doctor_exports, {
@@ -2536,6 +2683,23 @@ var COMMAND_SCHEMAS = [
     examples: ["agent-flutter doctor", "agent-flutter --json doctor"]
   },
   {
+    name: "text",
+    description: "Extract visible text from Android accessibility layer (UIAutomator)",
+    args: [{ name: "query", required: false, description: "Text to search for (substring, case-insensitive)" }],
+    flags: [
+      { name: "--json", description: "JSON output" },
+      { name: "--all", description: "Include source, class, bounds metadata (with --json)" }
+    ],
+    exitCodes: { "0": "success (or text found)", "1": "text not found (search mode)", "2": "error" },
+    examples: [
+      "agent-flutter text",
+      "agent-flutter text --json",
+      'agent-flutter text "Featured"',
+      'agent-flutter text "Sign In" --json',
+      "agent-flutter text --json --all"
+    ]
+  },
+  {
     name: "schema",
     description: "Show command schema for agent discovery",
     args: [{ name: "command", required: false, description: "Specific command to describe" }],
@@ -2603,7 +2767,7 @@ function validateDeviceId(deviceId) {
 }
 
 // src/cli.ts
-var HELP14 = `agent-flutter \u2014 Control Flutter apps via Marionette
+var HELP15 = `agent-flutter \u2014 Control Flutter apps via Marionette
 
 Usage: agent-flutter [--device <id>] [--json] [--no-json] <command> [args...]
 
@@ -2628,6 +2792,7 @@ Commands:
   reload                   Hot reload the Flutter app
   logs                     Get Flutter app logs
   dismiss [--check]        Dismiss system dialog
+  text [query] [--all]     Visible text from accessibility layer (exit 0=found, 1=not found)
   schema [cmd]             Show command schema (JSON)
   doctor                   Check prerequisites and diagnose issues
   diff snapshot            Show changes since last snapshot
@@ -2721,7 +2886,7 @@ async function main() {
     if (jsonMode) {
       console.log(JSON.stringify(getSchema()));
     } else {
-      console.log(HELP14.trim());
+      console.log(HELP15.trim());
     }
     return;
   }
@@ -2729,7 +2894,7 @@ async function main() {
     if (jsonMode) {
       console.log(JSON.stringify(getSchema()));
     } else {
-      console.log(HELP14.trim());
+      console.log(HELP15.trim());
     }
     return;
   }
@@ -2802,6 +2967,9 @@ async function main() {
         break;
       case "dismiss":
         await (await Promise.resolve().then(() => (init_dismiss(), dismiss_exports))).dismissCommand(cmdArgs);
+        break;
+      case "text":
+        await (await Promise.resolve().then(() => (init_text(), text_exports))).textCommand(cmdArgs);
         break;
       case "doctor":
         await (await Promise.resolve().then(() => (init_doctor(), doctor_exports))).doctorCommand(cmdArgs);
