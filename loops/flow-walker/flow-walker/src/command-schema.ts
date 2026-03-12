@@ -88,6 +88,22 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
     ],
   },
   {
+    name: 'push',
+    description: 'Upload report to hosted service and return shareable URL',
+    args: [
+      { name: 'run-dir', required: true, description: 'Directory containing run.json and report.html', type: 'path' },
+    ],
+    flags: [
+      { name: '--json', type: 'boolean', description: 'Machine-readable JSON output' },
+      { name: '--no-json', type: 'boolean', description: 'Force human-readable output' },
+    ],
+    exitCodes: { '0': 'success', '2': 'error' },
+    examples: [
+      'flow-walker push ./run-output/P-tnB_sgKA/',
+      'flow-walker push ./run-output/P-tnB_sgKA/ --json',
+    ],
+  },
+  {
     name: 'schema',
     description: 'Show command schema for agent discovery (always JSON)',
     args: [

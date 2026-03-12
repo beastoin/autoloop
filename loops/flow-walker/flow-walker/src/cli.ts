@@ -10,6 +10,7 @@ import { validateRunResult, type RunResult } from './run-schema.ts';
 import { FlowWalkerError, ErrorCodes, formatError } from './errors.ts';
 import { validateFlowPath, validateOutputDir, validateUri, validateBundleId, validateRunDir } from './validate.ts';
 import { COMMAND_SCHEMAS, getCommandSchema, getSchemaEnvelope } from './command-schema.ts';
+import { pushReport } from './push.ts';
 
 const DEFAULT_BLOCKLIST = 'delete,sign out,remove,reset,unpair,logout,clear all';
 
@@ -29,6 +30,7 @@ Usage:
   flow-walker walk [options]        Auto-explore app and generate YAML flows
   flow-walker run <flow.yaml>       Execute a YAML flow and produce run.json
   flow-walker report <run-dir>      Generate HTML report from run results
+  flow-walker push <run-dir>        Upload report and return shareable URL
   flow-walker schema [command]      Show command schema for agent discovery
 
 Run: flow-walker schema for machine-readable command descriptions.
@@ -85,13 +87,15 @@ async function main(): Promise<void> {
       await handleRun(values, positionals, json, agentPath, dryRun);
     } else if (subcommand === 'report') {
       await handleReport(values, positionals, json);
+    } else if (subcommand === 'push') {
+      await handlePush(values, positionals, json);
     } else if (subcommand === 'schema') {
       handleSchema(positionals);
     } else {
       throw new FlowWalkerError(
         ErrorCodes.INVALID_ARGS,
         `Unknown subcommand: ${subcommand}`,
-        'Available: walk, run, report, schema. Run: flow-walker schema',
+        'Available: walk, run, report, push, schema. Run: flow-walker schema',
       );
     }
   } catch (err) {
@@ -243,6 +247,37 @@ async function handleReport(
     console.log(JSON.stringify({ report: outputPath }));
   } else {
     console.log(`Report generated: ${outputPath}`);
+  }
+
+  process.exit(0);
+}
+
+async function handlePush(
+  _values: Record<string, unknown>,
+  positionals: string[],
+  json: boolean,
+): Promise<void> {
+  const runDir = positionals[1];
+  if (!runDir) {
+    throw new FlowWalkerError(
+      ErrorCodes.INVALID_ARGS,
+      'Run directory is required',
+      'Usage: flow-walker push <run-dir>. Run: flow-walker schema push',
+    );
+  }
+
+  validateRunDir(runDir);
+
+  const apiUrl = process.env.FLOW_WALKER_API_URL;
+  const result = await pushReport(runDir, { apiUrl });
+
+  if (json) {
+    console.log(JSON.stringify(result));
+  } else {
+    console.log(`\nReport uploaded successfully.`);
+    console.log(`  URL: ${result.url}`);
+    console.log(`  ID:  ${result.id}`);
+    console.log(`  Expires: ${result.expiresAt}`);
   }
 
   process.exit(0);
