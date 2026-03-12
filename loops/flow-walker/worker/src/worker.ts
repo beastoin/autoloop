@@ -374,11 +374,6 @@ function buildLandingPage(stats: Stats, baseUrl: string): string {
   const recentRows = stats.recentRuns
     .map((r) => {
       const flowLabel = r.flowName ? escapeHtml(r.flowName) : r.id;
-      const appTag = r.appName
-        ? r.appUrl
-          ? `<span class="tag tag-app"><a href="${escapeHtml(r.appUrl)}">${escapeHtml(r.appName)}</a></span>`
-          : `<span class="tag tag-app">${escapeHtml(r.appName)}</span>`
-        : '';
       const allPass = r.stepsTotal && r.stepsPass === r.stepsTotal;
       const stepClass = allPass ? 'tag-steps' : 'tag-steps-warn';
       const stepTag = r.stepsTotal
@@ -390,7 +385,7 @@ function buildLandingPage(stats: Stats, baseUrl: string): string {
       return `
         <a href="${baseUrl}/runs/${r.id}.html" class="run-row">
           <span class="run-label">${flowLabel}</span>
-          <span class="run-tags">${appTag}${stepTag}${durationTag}</span>
+          <span class="run-tags">${stepTag}${durationTag}</span>
           <span class="run-time">${timeAgo(r.uploadedAt)}</span>
         </a>`;
     })
@@ -475,9 +470,6 @@ function buildLandingPage(stats: Stats, baseUrl: string): string {
     display: inline-block; padding: 2px 8px; border-radius: 10px;
     font-size: 0.7rem; white-space: nowrap; letter-spacing: 0.3px;
   }
-  .tag-app { background: #1a2332; color: #7dd3fc; border: 1px solid #2a3a4a; }
-  .tag-app a { color: #7dd3fc; text-decoration: none; }
-  .tag-app a:hover { color: #bae6fd; }
   .tag-steps { background: #1a2e1a; color: #86efac; border: 1px solid #2a4a2a; }
   .tag-steps-warn { background: #2e1a1a; color: #fca5a5; border: 1px solid #4a2a2a; }
   .tag-duration { background: #2a2a1a; color: #fde68a; border: 1px solid #4a4a2a; }
