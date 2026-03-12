@@ -37,6 +37,7 @@ export async function pushReport(
   let flowName: string | undefined;
   let stepsTotal: number | undefined;
   let stepsPass: number | undefined;
+  let duration: number | undefined;
   let appName: string | undefined;
   let appUrl: string | undefined;
   let runJsonContent: string | undefined;
@@ -47,6 +48,7 @@ export async function pushReport(
       const runData = JSON.parse(raw);
       if (!runId) runId = runData.id;
       if (runData.flow) flowName = String(runData.flow);
+      if (typeof runData.duration === 'number') duration = runData.duration;
       if (runData.app) appName = String(runData.app);
       if (runData.appUrl || runData.app_url) appUrl = String(runData.appUrl || runData.app_url);
       if (Array.isArray(runData.steps)) {
@@ -79,6 +81,7 @@ export async function pushReport(
   if (flowName) headers['X-Flow-Name'] = flowName;
   if (stepsTotal !== undefined) headers['X-Steps-Total'] = String(stepsTotal);
   if (stepsPass !== undefined) headers['X-Steps-Pass'] = String(stepsPass);
+  if (duration !== undefined) headers['X-Duration'] = String(duration);
   if (appName) headers['X-App-Name'] = appName;
   if (appUrl) headers['X-App-URL'] = appUrl;
 

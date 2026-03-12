@@ -11,6 +11,7 @@ interface RecentRun {
   flowName?: string;
   stepsTotal?: number;
   stepsPass?: number;
+  duration?: number;
   appName?: string;
   appUrl?: string;
 }
@@ -27,7 +28,7 @@ interface Stats {
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Accept, X-Run-ID, X-Flow-Name, X-Steps-Total, X-Steps-Pass, X-App-Name, X-App-URL',
+  'Access-Control-Allow-Headers': 'Content-Type, Accept, X-Run-ID, X-Flow-Name, X-Steps-Total, X-Steps-Pass, X-Duration, X-App-Name, X-App-URL',
 };
 
 const TTL_DAYS = 30;
@@ -182,6 +183,7 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
   const flowName = request.headers.get('X-Flow-Name') || undefined;
   const stepsTotal = parseInt(request.headers.get('X-Steps-Total') || '', 10) || undefined;
   const stepsPass = parseInt(request.headers.get('X-Steps-Pass') || '', 10) || undefined;
+  const duration = parseInt(request.headers.get('X-Duration') || '', 10) || undefined;
   const appName = request.headers.get('X-App-Name') || undefined;
   const appUrl = request.headers.get('X-App-URL') || undefined;
 
@@ -208,7 +210,7 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
   try {
     await updateStats(env, {
       id: runId, uploadedAt, sizeBytes: body.byteLength,
-      flowName, stepsTotal, stepsPass, appName, appUrl,
+      flowName, stepsTotal, stepsPass, duration, appName, appUrl,
     });
   } catch { /* stats update failure should not break push */ }
 
@@ -341,6 +343,14 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  const mins = Math.floor(ms / 60000);
+  const secs = Math.floor((ms % 60000) / 1000);
+  return secs > 0 ? `${mins}m${secs}s` : `${mins}m`;
+}
+
 function passRate(total: number, pass: number): string {
   if (total === 0) return '—';
   return `${((pass / total) * 100).toFixed(1)}%`;
@@ -356,18 +366,19 @@ function buildLandingPage(stats: Stats, baseUrl: string): string {
       const flowLabel = r.flowName ? escapeHtml(r.flowName) : r.id;
       const appTag = r.appName
         ? r.appUrl
-          ? ` <span class="run-app"><a href="${escapeHtml(r.appUrl)}">${escapeHtml(r.appName)}</a></span>`
-          : ` <span class="run-app">${escapeHtml(r.appName)}</span>`
+          ? `<span class="tag tag-app"><a href="${escapeHtml(r.appUrl)}">${escapeHtml(r.appName)}</a></span>`
+          : `<span class="tag tag-app">${escapeHtml(r.appName)}</span>`
         : '';
-      const label = flowLabel + appTag;
-      const stepInfo = r.stepsTotal
-        ? `<span class="run-steps">${r.stepsPass ?? 0}/${r.stepsTotal} pass</span>`
+      const stepTag = r.stepsTotal
+        ? `<span class="tag tag-steps">${r.stepsPass ?? 0}/${r.stepsTotal} pass</span>`
+        : '';
+      const durationTag = r.duration
+        ? `<span class="tag tag-duration">${formatDuration(r.duration)}</span>`
         : '';
       return `
         <a href="${baseUrl}/runs/${r.id}.html" class="run-row">
-          <span class="run-label">${label}</span>
-          ${stepInfo}
-          <span class="run-size">${formatBytes(r.sizeBytes)}</span>
+          <span class="run-label">${flowLabel}</span>
+          <span class="run-tags">${appTag}${stepTag}${durationTag}</span>
           <span class="run-time">${timeAgo(r.uploadedAt)}</span>
         </a>`;
     })
@@ -439,17 +450,22 @@ function buildLandingPage(stats: Stats, baseUrl: string): string {
   .recent { padding: 36px 0; }
   .recent h2 { font-size: 1.2rem; color: #fff; margin-bottom: 16px; text-align: center; }
   .run-row {
-    display: flex; justify-content: space-between; align-items: center;
+    display: flex; align-items: center;
     padding: 10px 16px; border-bottom: 1px solid #1a1a1a; color: #e0e0e0;
-    transition: background 0.15s; gap: 12px;
+    transition: background 0.15s; gap: 10px;
   }
   .run-row:hover { background: #111; text-decoration: none; }
-  .run-label { color: #6ee7b7; font-size: 0.9rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .run-app { color: #888; font-size: 0.8rem; }
-  .run-app a { color: #888; }
-  .run-app a:hover { color: #6ee7b7; }
-  .run-steps { color: #a0a0a0; font-size: 0.8rem; white-space: nowrap; }
-  .run-size { color: #666; font-size: 0.8rem; white-space: nowrap; }
+  .run-label { color: #6ee7b7; font-size: 0.9rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .run-tags { display: flex; gap: 6px; align-items: center; flex: 1; min-width: 0; }
+  .tag {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 0.7rem; white-space: nowrap; letter-spacing: 0.3px;
+  }
+  .tag-app { background: #1a2332; color: #7dd3fc; border: 1px solid #2a3a4a; }
+  .tag-app a { color: #7dd3fc; text-decoration: none; }
+  .tag-app a:hover { color: #bae6fd; }
+  .tag-steps { background: #1a2e1a; color: #86efac; border: 1px solid #2a4a2a; }
+  .tag-duration { background: #2a2a1a; color: #fde68a; border: 1px solid #4a4a2a; }
   .run-time { color: #555; font-size: 0.8rem; min-width: 50px; text-align: right; white-space: nowrap; }
   .empty { text-align: center; color: #555; padding: 32px 0; font-size: 0.9rem; }
 
