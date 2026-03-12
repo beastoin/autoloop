@@ -358,6 +358,14 @@ function passRate(total: number, pass: number): string {
   return `${((pass / total) * 100).toFixed(1)}%`;
 }
 
+function passRateColor(total: number, pass: number): string {
+  if (total === 0) return '#fff';
+  const pct = (pass / total) * 100;
+  if (pct >= 90) return '#6ee7b7';
+  if (pct >= 70) return '#fde68a';
+  return '#fca5a5';
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -371,8 +379,10 @@ function buildLandingPage(stats: Stats, baseUrl: string): string {
           ? `<span class="tag tag-app"><a href="${escapeHtml(r.appUrl)}">${escapeHtml(r.appName)}</a></span>`
           : `<span class="tag tag-app">${escapeHtml(r.appName)}</span>`
         : '';
+      const allPass = r.stepsTotal && r.stepsPass === r.stepsTotal;
+      const stepClass = allPass ? 'tag-steps' : 'tag-steps-warn';
       const stepTag = r.stepsTotal
-        ? `<span class="tag tag-steps">${r.stepsPass ?? 0}/${r.stepsTotal} pass</span>`
+        ? `<span class="tag ${stepClass}">${r.stepsPass ?? 0}/${r.stepsTotal} pass</span>`
         : '';
       const durationTag = r.duration
         ? `<span class="tag tag-duration">${formatDuration(r.duration)}</span>`
@@ -469,6 +479,7 @@ function buildLandingPage(stats: Stats, baseUrl: string): string {
   .tag-app a { color: #7dd3fc; text-decoration: none; }
   .tag-app a:hover { color: #bae6fd; }
   .tag-steps { background: #1a2e1a; color: #86efac; border: 1px solid #2a4a2a; }
+  .tag-steps-warn { background: #2e1a1a; color: #fca5a5; border: 1px solid #4a2a2a; }
   .tag-duration { background: #2a2a1a; color: #fde68a; border: 1px solid #4a4a2a; }
   .run-time { color: #555; font-size: 0.8rem; min-width: 50px; text-align: right; white-space: nowrap; }
   .empty { text-align: center; color: #555; padding: 32px 0; font-size: 0.9rem; }
@@ -509,7 +520,7 @@ function buildLandingPage(stats: Stats, baseUrl: string): string {
       <div class="label">Steps executed</div>
     </div>
     <div class="metric">
-      <div class="value">${passRate(stats.totalSteps, stats.totalStepsPass)}</div>
+      <div class="value" style="color:${passRateColor(stats.totalSteps, stats.totalStepsPass)}">${passRate(stats.totalSteps, stats.totalStepsPass)}</div>
       <div class="label">Pass rate</div>
     </div>
     <div class="metric">
