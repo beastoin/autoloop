@@ -59,9 +59,9 @@ Loop: read program → implement → run eval → pass: keep, fail: revert → r
 
 | Loop | Build target | Product repo | Status |
 |------|-------------|--------------|--------|
-| `loops/agent-flutter/` | Flutter testing CLI | [beastoin/agent-flutter](https://github.com/beastoin/agent-flutter) | Phase 9 complete (v1.4.0) |
+| `loops/agent-flutter/` | Flutter testing CLI | [beastoin/agent-flutter](https://github.com/beastoin/agent-flutter) | Phase 10 (v1.4.0 + text command) |
 | `loops/agent-swift/` | macOS Accessibility CLI | [beastoin/agent-swift](https://github.com/beastoin/agent-swift) | Phase 7 complete (v0.2.1) |
-| `loops/flow-walker/` | YAML flow discovery + execution | [beastoin/flow-walker](https://github.com/beastoin/flow-walker) | Phase 3 complete |
+| `loops/flow-walker/` | YAML flow discovery + execution | [beastoin/flow-walker](https://github.com/beastoin/flow-walker) | Phase 6 + text assertions |
 
 ## Publish flow
 

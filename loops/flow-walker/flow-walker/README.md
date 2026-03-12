@@ -164,6 +164,11 @@ steps:
     assert:
       has_type: { type: switch, min: 2 }
 
+  - name: Verify visible text on screen
+    assert:
+      text_visible: ["Featured", "Home"]
+      text_not_visible: ["Error", "Sign In"]
+
   - name: Return to home tab
     press: { bottom_nav_tab: 0 }
     screenshot: final
@@ -187,6 +192,8 @@ steps:
 | `interactive_count` | `{ min: 20 }` | Min total interactive elements on screen |
 | `bottom_nav_tabs` | `{ min: 4 }` | Min bottom navigation tabs |
 | `has_type` | `{ type: switch, min: 2 }` | Min elements of a specific type |
+| `text_visible` | `["Featured", "Home"]` | Text must be visible on screen (via UIAutomator) |
+| `text_not_visible` | `["Error", "Sign In"]` | Text must NOT be visible on screen |
 
 ## Agent-friendly design
 

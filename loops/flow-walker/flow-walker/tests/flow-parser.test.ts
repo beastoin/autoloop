@@ -289,4 +289,70 @@ steps:
     assert.equal(flow.app, undefined);
     assert.equal(flow.appUrl, undefined);
   });
+
+  it('parses text_visible assertion with array', () => {
+    const yaml = `
+name: text-check
+steps:
+  - name: Verify featured text
+    assert:
+      text_visible: ["Featured", "Create Your Own App"]
+`;
+    const flow = parseFlow(yaml);
+    assert.deepEqual(flow.steps[0].assert?.text_visible, ['Featured', 'Create Your Own App']);
+  });
+
+  it('parses text_not_visible assertion with array', () => {
+    const yaml = `
+name: text-check
+steps:
+  - name: Verify no error text
+    assert:
+      text_not_visible: ["Error", "Sign In"]
+`;
+    const flow = parseFlow(yaml);
+    assert.deepEqual(flow.steps[0].assert?.text_not_visible, ['Error', 'Sign In']);
+  });
+
+  it('parses both text_visible and text_not_visible together', () => {
+    const yaml = `
+name: text-check
+steps:
+  - name: Verify screen text
+    assert:
+      text_visible: ["Featured"]
+      text_not_visible: ["Error"]
+`;
+    const flow = parseFlow(yaml);
+    assert.deepEqual(flow.steps[0].assert?.text_visible, ['Featured']);
+    assert.deepEqual(flow.steps[0].assert?.text_not_visible, ['Error']);
+  });
+
+  it('parses text_visible with single value (not array)', () => {
+    const yaml = `
+name: text-check
+steps:
+  - name: Check text
+    assert:
+      text_visible: Featured
+`;
+    const flow = parseFlow(yaml);
+    assert.deepEqual(flow.steps[0].assert?.text_visible, ['Featured']);
+  });
+
+  it('parses text assertions alongside other assertions', () => {
+    const yaml = `
+name: combined-assert
+steps:
+  - name: Full check
+    assert:
+      interactive_count: { min: 10 }
+      text_visible: ["Featured", "Home"]
+      text_not_visible: ["Error"]
+`;
+    const flow = parseFlow(yaml);
+    assert.equal(flow.steps[0].assert?.interactive_count?.min, 10);
+    assert.deepEqual(flow.steps[0].assert?.text_visible, ['Featured', 'Home']);
+    assert.deepEqual(flow.steps[0].assert?.text_not_visible, ['Error']);
+  });
 });

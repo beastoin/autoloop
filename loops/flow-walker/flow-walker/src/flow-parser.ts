@@ -100,6 +100,12 @@ export function parseFlow(yamlContent: string): Flow {
     } else if (trimmed.startsWith('has_type:')) {
       if (!currentStep.assert) currentStep.assert = {};
       currentStep.assert.has_type = parseInlineObject(trimmed.slice(9).trim()) as { type: string; min?: number };
+    } else if (trimmed.startsWith('text_visible:')) {
+      if (!currentStep.assert) currentStep.assert = {};
+      currentStep.assert.text_visible = parseInlineArray(trimmed.slice(13).trim());
+    } else if (trimmed.startsWith('text_not_visible:')) {
+      if (!currentStep.assert) currentStep.assert = {};
+      currentStep.assert.text_not_visible = parseInlineArray(trimmed.slice(17).trim());
     }
   }
 
@@ -172,6 +178,21 @@ function parseInlineObject(raw: string): Record<string, unknown> {
   }
 
   return result;
+}
+
+/** Parse an inline YAML array like ["Featured", "Create Your Own App"] */
+function parseInlineArray(raw: string): string[] {
+  const str = raw.trim();
+  if (!str.startsWith('[') || !str.endsWith(']')) {
+    // Single value — wrap in array
+    const val = parseScalarValue(str);
+    return val ? [val] : [];
+  }
+
+  const inner = str.slice(1, -1).trim();
+  if (!inner) return [];
+
+  return splitCommas(inner).map(s => parseScalarValue(s)).filter(Boolean);
 }
 
 /** Split string by commas, respecting quoted strings */

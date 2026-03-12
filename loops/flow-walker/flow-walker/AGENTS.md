@@ -258,6 +258,10 @@ steps:
 | Element count | `interactive_count: { min: 20 }` |
 | Nav tabs | `bottom_nav_tabs: { min: 4 }` |
 | Element type | `has_type: { type: switch, min: 2 }` |
+| Text visible | `text_visible: ["Featured", "Home"]` |
+| Text absent | `text_not_visible: ["Error", "Sign In"]` |
+
+Text assertions use Android UIAutomator (via `agent-flutter text`) to check visible text from the accessibility layer. This captures text that Marionette snapshots miss (labels, content descriptions, system UI).
 
 ## Exit codes
 
