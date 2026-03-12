@@ -107,7 +107,7 @@ check "validate.ts rejects path traversal" bash -c "
 "
 
 check "validate.ts rejects control chars" bash -c "
-  grep -qE 'control|\\\\x00|\\\\x1f|[\x00-\x1f]' '$WALKER_DIR/src/validate.ts'
+  grep -qE 'control|charCodeAt|0x00|0x1f' '$WALKER_DIR/src/validate.ts'
 "
 
 check "cli.ts imports from validate.ts" bash -c "
@@ -171,7 +171,7 @@ echo ""
 echo "── Gate 10: NDJSON streaming ──"
 
 check "walker.ts emits JSON events" bash -c "
-  grep -qE 'JSON.stringify.*type.*screen\|JSON.stringify.*type.*edge\|ndjson\|emit' '$WALKER_DIR/src/walker.ts'
+  grep -qE 'JSON.stringify.*type.*screen|JSON.stringify.*type.*edge|ndjson|emit' '$WALKER_DIR/src/walker.ts'
 "
 
 # ── Gate 11: Environment variables ──
