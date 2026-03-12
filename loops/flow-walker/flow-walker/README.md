@@ -5,7 +5,7 @@ Auto-discover app flows, execute YAML test flows, generate HTML reports.
 flow-walker is the **flow layer** — it defines, discovers, executes, and reports on flows. It uses [agent-flutter](https://github.com/beastoin/agent-flutter) and [agent-swift](https://github.com/beastoin/agent-swift) as **transport layers** that control specific platforms.
 
 ```
-flow-walker (flows: walk, run, report, schema)
+flow-walker (flows: walk, run, report, push, schema)
     |
 agent-flutter (Flutter apps on Android/iOS)
 agent-swift   (native macOS/iOS apps)
@@ -26,6 +26,9 @@ flow-walker run flows/tab-navigation.yaml
 
 # Generate HTML report
 flow-walker report ./run-output/<run-id>/
+
+# Share report (hosted)
+flow-walker push ./run-output/<run-id>/
 
 # Discover commands (agent-first)
 flow-walker schema
@@ -77,6 +80,20 @@ Self-contained HTML with embedded video, screenshots, and clickable step timelin
 ```bash
 flow-walker report ./run-output/25h7afGwBK/
 ```
+
+### `push` — Share report
+
+Uploads report.html to the hosted service and returns a shareable URL. No auth, no config.
+
+```bash
+flow-walker push ./run-output/25h7afGwBK/
+# => URL: https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK
+
+flow-walker push ./run-output/25h7afGwBK/ --json
+# => {"url":"https://...","id":"25h7afGwBK","expiresAt":"2026-04-11T..."}
+```
+
+Reports are stored for 30 days. Re-pushing the same run is idempotent — returns the same URL with updated expiry. Use `FLOW_WALKER_API_URL` env var to point at a custom server.
 
 ### `schema` — Agent discovery
 
@@ -153,7 +170,8 @@ Built following [Poehnelt's CLI-for-agents principles](https://justin.poehnelt.c
 - **Dry-run** — `--dry-run` parses and resolves targets without executing (includes resolve reasons)
 - **NDJSON streaming** — walk emits `walk:start`, `screen`, `edge`, `skip` events as one JSON per line
 - **Unique run IDs** — 10-char base64url per run, filesystem-safe, URL-safe
-- **Environment variables** — `FLOW_WALKER_OUTPUT_DIR`, `FLOW_WALKER_AGENT_PATH`, `FLOW_WALKER_DRY_RUN`, `FLOW_WALKER_JSON`
+- **Hosted sharing** — `flow-walker push` uploads report and returns a URL, no auth needed
+- **Environment variables** — `FLOW_WALKER_OUTPUT_DIR`, `FLOW_WALKER_AGENT_PATH`, `FLOW_WALKER_DRY_RUN`, `FLOW_WALKER_JSON`, `FLOW_WALKER_API_URL`
 - **Exit codes** — 0 = success, 1 = flow failure, 2 = error
 
 ## Architecture
@@ -182,6 +200,7 @@ App on device/emulator/desktop
 | 1 | walk: BFS explorer, fingerprinting, safety, YAML generation | Complete |
 | 2 | run + report: flow executor, video/screenshots, HTML viewer | Complete |
 | 3 | Agent-grade: structured errors, schema, input hardening, run IDs | Complete |
+| 4 | Hosted reports: push command, Cloudflare Worker + R2 | Complete |
 
 ## License
 

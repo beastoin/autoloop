@@ -11,10 +11,12 @@ Do not edit this repo directly — add a new phase program in autoloop instead.
 `flow-walker` is a Node.js CLI that auto-explores Flutter apps, executes YAML test flows, and generates HTML reports.
 It builds on [agent-flutter](https://github.com/beastoin/agent-flutter) for all device interaction.
 
-**Three commands:**
+**Five commands:**
 - `walk` — BFS-explore the app, discover screens, generate YAML flows
 - `run` — Execute a YAML flow, produce run.json + video + screenshots
 - `report` — Generate self-contained HTML report from run results
+- `push` — Upload report to hosted service, return shareable URL
+- `schema` — Machine-readable command introspection
 
 **Design principles:**
 1. **agent-flutter as transport** — never touches VM Service or ADB directly
@@ -36,8 +38,12 @@ It builds on [agent-flutter](https://github.com/beastoin/agent-flutter) for all 
 - `src/runner.ts` — flow step execution engine
 - `src/reporter.ts` — HTML report generation
 - `src/capture.ts` — video, screenshot, logcat helpers
-- `src/run-schema.ts` — RunResult type + validation
+- `src/run-schema.ts` — RunResult type + validation + run ID generation
 - `src/types.ts` — shared type definitions
+- `src/errors.ts` — structured error handling (FlowWalkerError)
+- `src/validate.ts` — input validation (paths, URIs, control chars)
+- `src/command-schema.ts` — command schema for agent discovery
+- `src/push.ts` — report upload to hosted service
 
 ## Build and test
 
@@ -60,6 +66,8 @@ npx tsc --noEmit            # typecheck
 |-------|-------|------|
 | 1 | walk: BFS explorer, fingerprinting, safety, YAML generation | eval.sh (19 gates) |
 | 2 | run + report: flow executor, video/screenshots, HTML viewer | eval2.sh (25 gates) |
+| 3 | Agent-grade: structured errors, schema, input hardening, run IDs | eval3.sh (41 gates) |
+| 4 | Hosted reports: push command, Cloudflare Worker + R2 | eval4.sh (17 gates) |
 
 ## What not to do
 

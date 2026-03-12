@@ -5,10 +5,11 @@
 flow-walker is the **flow layer** — it discovers, executes, and reports on app flows.
 It uses [agent-flutter](https://github.com/beastoin/agent-flutter) and [agent-swift](https://github.com/beastoin/agent-swift) as **transport layers** that control specific platforms.
 
-**Four commands:**
+**Five commands:**
 - `walk` — BFS-explore the app, discover screens, generate YAML flows
 - `run` — Execute a YAML flow, produce run.json + video + screenshots
 - `report` — Generate self-contained HTML report from run results
+- `push` — Upload report to hosted service, return shareable URL
 - `schema` — Machine-readable command introspection (agent discovery)
 
 ## Agent-first workflow
@@ -26,6 +27,10 @@ flow-walker run flow.yaml --json      # → run.json with unique run ID
 
 # 4. Report
 flow-walker report ./run-output/<run-id>/
+
+# 5. Share (hosted)
+flow-walker push ./run-output/<run-id>/ --json  # → { url, id, expiresAt }
+# URL serves the report in a browser — no auth needed
 ```
 
 ## Prerequisites
@@ -142,6 +147,16 @@ done
 }
 ```
 
+### push result (from push --json)
+
+```json
+{
+  "url": "https://flow-walker.beastoin.workers.dev/runs/25h7afGwBK",
+  "id": "25h7afGwBK",
+  "expiresAt": "2026-04-11T13:22:12.070Z"
+}
+```
+
 ### Structured error (on failure)
 
 ```json
@@ -208,4 +223,5 @@ steps:
 | `FLOW_WALKER_AGENT_PATH` | Path to agent-flutter binary | `agent-flutter` |
 | `FLOW_WALKER_DRY_RUN` | Enable dry-run mode | `0` |
 | `FLOW_WALKER_JSON` | Force JSON output | auto (TTY detection) |
+| `FLOW_WALKER_API_URL` | Hosted service URL for push | `https://flow-walker.beastoin.workers.dev` |
 | `AGENT_FLUTTER_DEVICE` | ADB device ID | auto-detect |
