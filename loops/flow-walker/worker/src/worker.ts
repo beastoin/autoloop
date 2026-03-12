@@ -1,7 +1,14 @@
-// flow-walker Worker: store and serve HTML reports via R2
+// flow-walker Worker: store and serve HTML reports via R2, landing page with live metrics
 
 interface Env {
   BUCKET: R2Bucket;
+}
+
+interface Stats {
+  totalReports: number;
+  totalBytes: number;
+  lastPushAt: string;
+  recentRuns: { id: string; uploadedAt: string; sizeBytes: number }[];
 }
 
 const CORS_HEADERS = {
@@ -13,6 +20,8 @@ const CORS_HEADERS = {
 const TTL_DAYS = 30;
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20MB
 const RATE_LIMIT_PER_DAY = 100;
+const STATS_KEY = 'stats.json';
+const MAX_RECENT_RUNS = 10;
 
 // Simple in-memory rate limiting (resets on Worker restart, which is fine for v1)
 const uploadCounts = new Map<string, { count: number; resetAt: number }>();
@@ -26,6 +35,32 @@ function isRateLimited(ip: string): boolean {
   }
   entry.count++;
   return entry.count > RATE_LIMIT_PER_DAY;
+}
+
+async function loadStats(env: Env): Promise<Stats> {
+  const obj = await env.BUCKET.get(STATS_KEY);
+  if (!obj) {
+    return { totalReports: 0, totalBytes: 0, lastPushAt: '', recentRuns: [] };
+  }
+  try {
+    return await obj.json<Stats>();
+  } catch {
+    return { totalReports: 0, totalBytes: 0, lastPushAt: '', recentRuns: [] };
+  }
+}
+
+async function updateStats(env: Env, runId: string, sizeBytes: number): Promise<void> {
+  const stats = await loadStats(env);
+  stats.totalReports++;
+  stats.totalBytes += sizeBytes;
+  stats.lastPushAt = new Date().toISOString();
+  stats.recentRuns.unshift({ id: runId, uploadedAt: stats.lastPushAt, sizeBytes });
+  if (stats.recentRuns.length > MAX_RECENT_RUNS) {
+    stats.recentRuns = stats.recentRuns.slice(0, MAX_RECENT_RUNS);
+  }
+  await env.BUCKET.put(STATS_KEY, JSON.stringify(stats), {
+    httpMetadata: { contentType: 'application/json' },
+  });
 }
 
 export default {
@@ -48,9 +83,15 @@ export default {
       return handleGetReport(runMatch[1], env);
     }
 
-    // GET / — simple status
+    // GET /api/stats — raw stats JSON
+    if (request.method === 'GET' && url.pathname === '/api/stats') {
+      const stats = await loadStats(env);
+      return Response.json(stats, { headers: CORS_HEADERS });
+    }
+
+    // GET / — landing page
     if (request.method === 'GET' && url.pathname === '/') {
-      return Response.json({ service: 'flow-walker', status: 'ok' }, { headers: CORS_HEADERS });
+      return handleLandingPage(request, env);
     }
 
     return Response.json(
@@ -115,6 +156,11 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
     customMetadata: { expiresAt, uploadedAt: new Date().toISOString() },
   });
 
+  // Update stats (best-effort — don't block the response on failure)
+  try {
+    await updateStats(env, runId, body.byteLength);
+  } catch { /* stats update failure should not break push */ }
+
   const baseUrl = new URL(request.url).origin;
   const reportUrl = `${baseUrl}/runs/${runId}`;
 
@@ -153,6 +199,193 @@ async function handleGetReport(runId: string, env: Env): Promise<Response> {
       ...CORS_HEADERS,
     },
   });
+}
+
+async function handleLandingPage(request: Request, env: Env): Promise<Response> {
+  const stats = await loadStats(env);
+  const baseUrl = new URL(request.url).origin;
+  const html = buildLandingPage(stats, baseUrl);
+  return new Response(html, {
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'public, max-age=60',
+      ...CORS_HEADERS,
+    },
+  });
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function timeAgo(iso: string): string {
+  if (!iso) return 'never';
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function buildLandingPage(stats: Stats, baseUrl: string): string {
+  const recentRows = stats.recentRuns
+    .map(
+      (r) => `
+        <a href="${baseUrl}/runs/${r.id}" class="run-row">
+          <span class="run-id">${r.id}</span>
+          <span class="run-size">${formatBytes(r.sizeBytes)}</span>
+          <span class="run-time">${timeAgo(r.uploadedAt)}</span>
+        </a>`,
+    )
+    .join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>flow-walker — Map your app. Run your flows. Share results.</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #0a0a0a; color: #e0e0e0; line-height: 1.6;
+    min-height: 100vh;
+  }
+  a { color: #6ee7b7; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .container { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+
+  /* Hero */
+  .hero { padding: 80px 0 48px; text-align: center; }
+  .hero h1 { font-size: 2rem; font-weight: 700; color: #fff; margin-bottom: 12px; }
+  .hero p { font-size: 1.1rem; color: #a0a0a0; max-width: 480px; margin: 0 auto 32px; }
+  .hero code {
+    display: inline-block; background: #1a1a2e; border: 1px solid #333;
+    border-radius: 6px; padding: 8px 20px; font-size: 0.95rem; color: #6ee7b7;
+  }
+
+  /* Metrics strip */
+  .metrics { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; padding: 32px 0; }
+  .metric {
+    background: #111; border: 1px solid #222; border-radius: 8px;
+    padding: 20px 28px; text-align: center; min-width: 140px; flex: 1; max-width: 200px;
+  }
+  .metric .value { font-size: 1.8rem; font-weight: 700; color: #fff; }
+  .metric .label { font-size: 0.8rem; color: #888; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* Pipeline */
+  .pipeline { padding: 40px 0; }
+  .pipeline h2 { font-size: 1.2rem; color: #fff; margin-bottom: 20px; text-align: center; }
+  .steps { display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap; }
+  .step {
+    background: #111; border: 1px solid #222; border-radius: 6px;
+    padding: 12px 16px; text-align: center; flex: 1; min-width: 120px; max-width: 160px;
+  }
+  .step .cmd { font-family: monospace; font-size: 0.85rem; color: #6ee7b7; }
+  .step .desc { font-size: 0.75rem; color: #888; margin-top: 4px; }
+  .arrow { color: #444; font-size: 1.2rem; }
+
+  /* Recent runs */
+  .recent { padding: 40px 0; }
+  .recent h2 { font-size: 1.2rem; color: #fff; margin-bottom: 16px; text-align: center; }
+  .run-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 16px; border-bottom: 1px solid #1a1a1a; color: #e0e0e0;
+    transition: background 0.15s;
+  }
+  .run-row:hover { background: #111; text-decoration: none; }
+  .run-id { font-family: monospace; color: #6ee7b7; font-size: 0.9rem; }
+  .run-size { color: #888; font-size: 0.85rem; }
+  .run-time { color: #666; font-size: 0.85rem; min-width: 60px; text-align: right; }
+  .empty { text-align: center; color: #555; padding: 32px 0; font-size: 0.9rem; }
+
+  /* Footer */
+  .footer {
+    padding: 48px 0 32px; text-align: center; border-top: 1px solid #1a1a1a; margin-top: 40px;
+  }
+  .footer p { color: #666; font-size: 0.85rem; margin-bottom: 8px; }
+  .footer a { color: #6ee7b7; }
+
+  @media (max-width: 480px) {
+    .hero h1 { font-size: 1.5rem; }
+    .metric { min-width: 100px; padding: 14px 16px; }
+    .metric .value { font-size: 1.4rem; }
+    .steps { flex-direction: column; }
+    .arrow { transform: rotate(90deg); }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <section class="hero">
+    <h1>Map your app. Run your flows. Share results.</h1>
+    <p>Auto-discover every screen, execute YAML test flows, generate self-contained HTML reports, share with one command.</p>
+    <code>npm install -g flow-walker-cli</code>
+  </section>
+
+  <section class="metrics">
+    <div class="metric">
+      <div class="value">${stats.totalReports}</div>
+      <div class="label">Reports pushed</div>
+    </div>
+    <div class="metric">
+      <div class="value">${formatBytes(stats.totalBytes)}</div>
+      <div class="label">Data served</div>
+    </div>
+    <div class="metric">
+      <div class="value">${stats.lastPushAt ? timeAgo(stats.lastPushAt) : '—'}</div>
+      <div class="label">Last push</div>
+    </div>
+  </section>
+
+  <section class="pipeline">
+    <h2>3 commands. Zero config.</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="cmd">walk</div>
+        <div class="desc">Discover screens</div>
+      </div>
+      <span class="arrow">→</span>
+      <div class="step">
+        <div class="cmd">run</div>
+        <div class="desc">Execute + record</div>
+      </div>
+      <span class="arrow">→</span>
+      <div class="step">
+        <div class="cmd">report</div>
+        <div class="desc">Generate HTML</div>
+      </div>
+      <span class="arrow">→</span>
+      <div class="step">
+        <div class="cmd">push</div>
+        <div class="desc">Share via URL</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="recent">
+    <h2>Recent reports</h2>
+    ${recentRows || '<div class="empty">No reports yet. Be the first: flow-walker push</div>'}
+  </section>
+
+  <footer class="footer">
+    <p>Open source &middot; MIT license &middot; <a href="https://github.com/beastoin/flow-walker">GitHub</a></p>
+    <p>Built with <a href="https://github.com/beastoin/agent-flutter">agent-flutter</a></p>
+  </footer>
+</div>
+
+</body>
+</html>`;
 }
 
 function generateId(): string {

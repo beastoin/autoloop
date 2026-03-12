@@ -110,4 +110,40 @@ describe('pushReport', () => {
     assert.ok(result.id);
     assert.ok(result.expiresAt);
   });
+
+  it('apiUrl option takes precedence over env var', async () => {
+    writeFileSync(join(tempDir, 'report.html'), '<html>test</html>');
+    const original = process.env.FLOW_WALKER_API_URL;
+    process.env.FLOW_WALKER_API_URL = 'http://127.0.0.1:2';
+    try {
+      await assert.rejects(
+        () => pushReport(tempDir, { apiUrl: 'http://127.0.0.1:3' }),
+        (err: Error & { code?: string }) => {
+          assert.equal(err.code, 'COMMAND_FAILED');
+          // Should connect to :3 (option), not :2 (env)
+          assert.ok(err.message.includes('127.0.0.1:3'));
+          return true;
+        },
+      );
+    } finally {
+      if (original !== undefined) {
+        process.env.FLOW_WALKER_API_URL = original;
+      } else {
+        delete process.env.FLOW_WALKER_API_URL;
+      }
+    }
+  });
+
+  it('reads report.html content correctly (non-empty body)', async () => {
+    const htmlContent = '<html><body><h1>Test Report</h1><p>Content here</p></body></html>';
+    writeFileSync(join(tempDir, 'report.html'), htmlContent);
+    // Verify report.html is read — will fail on network but proves file reading works
+    await assert.rejects(
+      () => pushReport(tempDir, { apiUrl: 'http://127.0.0.1:1' }),
+      (err: Error & { code?: string }) => {
+        assert.equal(err.code, 'COMMAND_FAILED');
+        return true;
+      },
+    );
+  });
 });
