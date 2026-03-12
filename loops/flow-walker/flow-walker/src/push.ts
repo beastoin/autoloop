@@ -1,4 +1,4 @@
-// Upload report.html to flow-walker hosted service
+// Upload report.html + run.json to flow-walker hosted service
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -36,23 +36,40 @@ export async function pushReport(
   let flowName: string | undefined;
   let stepsTotal: number | undefined;
   let stepsPass: number | undefined;
+  let appName: string | undefined;
+  let appUrl: string | undefined;
+  let runJsonContent: string | undefined;
   const runJsonPath = join(runDir, 'run.json');
   if (existsSync(runJsonPath)) {
     try {
-      const runData = JSON.parse(readFileSync(runJsonPath, 'utf-8'));
+      const raw = readFileSync(runJsonPath, 'utf-8');
+      const runData = JSON.parse(raw);
       if (!runId) runId = runData.id;
       if (runData.flow) flowName = String(runData.flow);
+      if (runData.app) appName = String(runData.app);
+      if (runData.appUrl || runData.app_url) appUrl = String(runData.appUrl || runData.app_url);
       if (Array.isArray(runData.steps)) {
         stepsTotal = runData.steps.length;
         stepsPass = runData.steps.filter((s: { status?: string }) => s.status === 'pass').length;
       }
+      // Prepare run.json for upload — strip local file paths
+      const uploadData = { ...runData };
+      delete uploadData.video;
+      delete uploadData.log;
+      if (Array.isArray(uploadData.steps)) {
+        uploadData.steps = uploadData.steps.map((s: Record<string, unknown>) => {
+          const { screenshot: _s, ...rest } = s;
+          return rest;
+        });
+      }
+      runJsonContent = JSON.stringify(uploadData);
     } catch { /* ignore parse errors */ }
   }
 
   // Read report
   const reportContent = readFileSync(reportPath);
 
-  // Upload
+  // Upload report.html
   const headers: Record<string, string> = {
     'Content-Type': 'text/html',
     'Content-Length': String(reportContent.byteLength),
@@ -61,6 +78,8 @@ export async function pushReport(
   if (flowName) headers['X-Flow-Name'] = flowName;
   if (stepsTotal !== undefined) headers['X-Steps-Total'] = String(stepsTotal);
   if (stepsPass !== undefined) headers['X-Steps-Pass'] = String(stepsPass);
+  if (appName) headers['X-App-Name'] = appName;
+  if (appUrl) headers['X-App-URL'] = appUrl;
 
   let response: Response;
   try {
@@ -91,5 +110,17 @@ export async function pushReport(
   }
 
   const result = await response.json() as PushResult;
+
+  // Upload run.json (best-effort — don't fail push if this fails)
+  if (runJsonContent && result.id) {
+    try {
+      await fetch(`${apiUrl}/runs/${result.id}/data`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: runJsonContent,
+      });
+    } catch { /* best-effort */ }
+  }
+
   return result;
 }

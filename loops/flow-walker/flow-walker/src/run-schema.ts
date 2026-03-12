@@ -33,6 +33,8 @@ export interface StepResult {
 export interface RunResult {
   id: string;             // unique run ID (10-char base64url)
   flow: string;           // flow name
+  app?: string;           // app name (from flow YAML)
+  appUrl?: string;        // app URL (from flow YAML)
   device: string;         // device model/serial
   startedAt: string;      // ISO 8601
   duration: number;       // total ms

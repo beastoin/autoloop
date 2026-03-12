@@ -29,6 +29,10 @@ export function parseFlow(yamlContent: string): Flow {
         flow.name = parseScalarValue(line.slice(5));
       } else if (line.startsWith('description:')) {
         flow.description = parseScalarValue(line.slice(12));
+      } else if (line.startsWith('app:')) {
+        flow.app = parseScalarValue(line.slice(4));
+      } else if (line.startsWith('app_url:')) {
+        flow.appUrl = parseScalarValue(line.slice(8));
       } else if (line.startsWith('setup:')) {
         flow.setup = parseScalarValue(line.slice(6));
       } else if (line.startsWith('covers:')) {
@@ -110,6 +114,8 @@ export function parseFlow(yamlContent: string): Flow {
   return {
     name: flow.name,
     description: flow.description ?? '',
+    ...(flow.app ? { app: flow.app } : {}),
+    ...(flow.appUrl ? { appUrl: flow.appUrl } : {}),
     covers: flow.covers,
     prerequisites: flow.prerequisites,
     setup: flow.setup ?? 'normal',

@@ -261,4 +261,32 @@ steps:
       'app/lib/pages/settings/settings_drawer.dart'
     ]);
   });
+
+  it('parses app and app_url metadata', () => {
+    const yaml = `
+name: omi-navigation
+description: Test Omi app navigation
+app: Omi
+app_url: https://omi.me
+steps:
+  - name: Check home
+    screenshot: home
+`;
+    const flow = parseFlow(yaml);
+    assert.equal(flow.app, 'Omi');
+    assert.equal(flow.appUrl, 'https://omi.me');
+  });
+
+  it('omits app fields when not present', () => {
+    const yaml = `
+name: basic-flow
+description: No app metadata
+steps:
+  - name: Step 1
+    screenshot: s1
+`;
+    const flow = parseFlow(yaml);
+    assert.equal(flow.app, undefined);
+    assert.equal(flow.appUrl, undefined);
+  });
 });

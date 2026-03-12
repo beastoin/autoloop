@@ -11,6 +11,8 @@ interface RecentRun {
   flowName?: string;
   stepsTotal?: number;
   stepsPass?: number;
+  appName?: string;
+  appUrl?: string;
 }
 
 interface Stats {
@@ -24,8 +26,8 @@ interface Stats {
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, X-Run-ID, X-Flow-Name, X-Steps-Total, X-Steps-Pass',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Accept, X-Run-ID, X-Flow-Name, X-Steps-Total, X-Steps-Pass, X-App-Name, X-App-URL',
 };
 
 const TTL_DAYS = 30;
@@ -96,9 +98,20 @@ export default {
       return handleUpload(request, env);
     }
 
-    // GET /runs/:id — serve report
+    // GET/PUT /runs/:id/data — structured run data (JSON)
+    const dataMatch = url.pathname.match(/^\/runs\/([A-Za-z0-9_-]{6,20})\/data$/);
+    if (dataMatch) {
+      if (request.method === 'PUT') return handlePutData(request, dataMatch[1], env);
+      if (request.method === 'GET') return handleGetData(dataMatch[1], env);
+    }
+
+    // GET /runs/:id — serve report (or JSON via Accept header)
     const runMatch = url.pathname.match(/^\/runs\/([A-Za-z0-9_-]{6,20})$/);
     if (request.method === 'GET' && runMatch) {
+      const accept = request.headers.get('Accept') || '';
+      if (accept.includes('application/json')) {
+        return handleGetData(runMatch[1], env);
+      }
       return handleGetReport(runMatch[1], env);
     }
 
@@ -167,6 +180,8 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
   const flowName = request.headers.get('X-Flow-Name') || undefined;
   const stepsTotal = parseInt(request.headers.get('X-Steps-Total') || '', 10) || undefined;
   const stepsPass = parseInt(request.headers.get('X-Steps-Pass') || '', 10) || undefined;
+  const appName = request.headers.get('X-App-Name') || undefined;
+  const appUrl = request.headers.get('X-App-URL') || undefined;
 
   // Read body
   const body = await request.arrayBuffer();
@@ -191,7 +206,7 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
   try {
     await updateStats(env, {
       id: runId, uploadedAt, sizeBytes: body.byteLength,
-      flowName, stepsTotal, stepsPass,
+      flowName, stepsTotal, stepsPass, appName, appUrl,
     });
   } catch { /* stats update failure should not break push */ }
 
@@ -229,6 +244,51 @@ async function handleGetReport(runId: string, env: Env): Promise<Response> {
   return new Response(object.body, {
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'public, max-age=3600',
+      ...CORS_HEADERS,
+    },
+  });
+}
+
+async function handlePutData(request: Request, runId: string, env: Env): Promise<Response> {
+  const contentType = request.headers.get('Content-Type') || '';
+  if (!contentType.includes('application/json')) {
+    return Response.json(
+      { error: { code: 'INVALID_INPUT', message: 'Content-Type must be application/json' } },
+      { status: 400, headers: CORS_HEADERS },
+    );
+  }
+
+  const body = await request.arrayBuffer();
+  if (body.byteLength === 0 || body.byteLength > MAX_UPLOAD_BYTES) {
+    return Response.json(
+      { error: { code: 'INVALID_INPUT', message: 'Invalid body size' } },
+      { status: 400, headers: CORS_HEADERS },
+    );
+  }
+
+  const key = `runs/${runId}/run.json`;
+  await env.BUCKET.put(key, body, {
+    httpMetadata: { contentType: 'application/json; charset=utf-8' },
+  });
+
+  return Response.json({ ok: true, id: runId }, { status: 201, headers: CORS_HEADERS });
+}
+
+async function handleGetData(runId: string, env: Env): Promise<Response> {
+  const key = `runs/${runId}/run.json`;
+  const object = await env.BUCKET.get(key);
+
+  if (!object) {
+    return Response.json(
+      { error: { code: 'NOT_FOUND', message: `Run data for ${runId} not found` } },
+      { status: 404, headers: CORS_HEADERS },
+    );
+  }
+
+  return new Response(object.body, {
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'public, max-age=3600',
       ...CORS_HEADERS,
     },
@@ -287,7 +347,13 @@ function escapeHtml(s: string): string {
 function buildLandingPage(stats: Stats, baseUrl: string): string {
   const recentRows = stats.recentRuns
     .map((r) => {
-      const label = r.flowName ? escapeHtml(r.flowName) : r.id;
+      const flowLabel = r.flowName ? escapeHtml(r.flowName) : r.id;
+      const appTag = r.appName
+        ? r.appUrl
+          ? ` <span class="run-app"><a href="${escapeHtml(r.appUrl)}">${escapeHtml(r.appName)}</a></span>`
+          : ` <span class="run-app">${escapeHtml(r.appName)}</span>`
+        : '';
+      const label = flowLabel + appTag;
       const stepInfo = r.stepsTotal
         ? `<span class="run-steps">${r.stepsPass ?? 0}/${r.stepsTotal} pass</span>`
         : '';
@@ -373,6 +439,9 @@ function buildLandingPage(stats: Stats, baseUrl: string): string {
   }
   .run-row:hover { background: #111; text-decoration: none; }
   .run-label { color: #6ee7b7; font-size: 0.9rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .run-app { color: #888; font-size: 0.8rem; }
+  .run-app a { color: #888; }
+  .run-app a:hover { color: #6ee7b7; }
   .run-steps { color: #a0a0a0; font-size: 0.8rem; white-space: nowrap; }
   .run-size { color: #666; font-size: 0.8rem; white-space: nowrap; }
   .run-time { color: #555; font-size: 0.8rem; min-width: 50px; text-align: right; white-space: nowrap; }

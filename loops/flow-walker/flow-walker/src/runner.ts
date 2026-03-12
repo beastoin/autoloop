@@ -108,6 +108,8 @@ export async function runFlow(flow: Flow, options: RunOptions): Promise<RunResul
   const runResult: RunResult = {
     id: runId,
     flow: flow.name,
+    ...(flow.app ? { app: flow.app } : {}),
+    ...(flow.appUrl ? { appUrl: flow.appUrl } : {}),
     device,
     startedAt,
     duration,

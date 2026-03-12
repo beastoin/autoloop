@@ -58,6 +58,8 @@ export interface FlowStep {
 export interface Flow {
   name: string;
   description: string;
+  app?: string;
+  appUrl?: string;
   covers?: string[];
   prerequisites?: string[];
   setup: string;
