@@ -140,9 +140,10 @@ export async function textCommand(args: string[]): Promise<void> {
   let semEntries: SemanticsTextEntry[] = [];
 
   // Phase 1: Try semantics first when session is active (fast, works on animated pages)
+  // Note: semantics requires TalkBack/accessibility enabled on the device.
+  // Without it, this returns null and we fall back to UIAutomator.
   const session = loadSession();
   if (session) {
-    transport.ensureAccessibility();
     const result = await trySemantics(session.vmServiceUri);
     if (result) {
       texts = result.texts;
