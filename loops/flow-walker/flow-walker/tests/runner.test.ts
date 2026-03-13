@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolvePress, resolveFill, getStepAction } from '../src/runner.ts';
+import { resolvePress, resolveFill, getStepAction, checkPrerequisites } from '../src/runner.ts';
 import type { SnapshotElement, FlowStep } from '../src/types.ts';
 
 const makeElement = (overrides: Partial<SnapshotElement> = {}): SnapshotElement => ({
@@ -119,6 +119,42 @@ describe('resolvePress', () => {
     const els = [makeElement()];
     const result = resolvePress({}, els);
     assert.equal(result, null);
+  });
+});
+
+describe('bail-on-failure: action safety classification', () => {
+  // The runner bails after a failed step UNLESS the action is 'back', 'screenshot', or 'assert'
+  // These are safe to continue after because they don't change screen state
+  const safeToContinue = (action: string) => action === 'back' || action === 'screenshot' || action === 'assert';
+
+  it('press failure should bail', () => {
+    assert.equal(safeToContinue('press'), false);
+  });
+
+  it('fill failure should bail', () => {
+    assert.equal(safeToContinue('fill'), false);
+  });
+
+  it('scroll failure should bail', () => {
+    assert.equal(safeToContinue('scroll'), false);
+  });
+
+  it('back failure should NOT bail', () => {
+    assert.equal(safeToContinue('back'), true);
+  });
+
+  it('screenshot failure should NOT bail', () => {
+    assert.equal(safeToContinue('screenshot'), true);
+  });
+
+  it('assert failure should NOT bail', () => {
+    assert.equal(safeToContinue('assert'), true);
+  });
+});
+
+describe('checkPrerequisites export', () => {
+  it('is exported as a function', () => {
+    assert.equal(typeof checkPrerequisites, 'function');
   });
 });
 

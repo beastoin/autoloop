@@ -45,8 +45,85 @@ export async function runFlow(flow: Flow, options: RunOptions): Promise<RunResul
     } catch { /* warn but continue */ }
   }
 
+  // Check prerequisites before running steps
+  if (flow.prerequisites && flow.prerequisites.length > 0) {
+    const preCheck = checkPrerequisites(flow.prerequisites, bridge);
+    if (!preCheck.met) {
+      // Skip entire flow — prerequisites not met
+      for (let i = 0; i < flow.steps.length; i++) {
+        steps.push({
+          index: i,
+          name: flow.steps[i].name,
+          action: getStepAction(flow.steps[i]),
+          status: 'skip',
+          timestamp: Date.now() - t0,
+          duration: 0,
+          elementCount: 0,
+          error: `prerequisite not met: ${preCheck.failed}`,
+        });
+      }
+
+      if (!options.json) {
+        console.log(`  ✗ Prerequisites not met: ${preCheck.failed}`);
+        for (const s of steps) {
+          console.log(`  ○ Step ${s.index + 1}: ${s.name} [skip]`);
+        }
+      }
+
+      // Skip to cleanup (video/logcat/write result)
+      const duration = Date.now() - t0;
+      let videoPath: string | undefined;
+      if (videoHandle) {
+        const localVideo = join(outputDir, 'recording.mp4');
+        if (stopRecording(videoHandle, localVideo)) videoPath = 'recording.mp4';
+      }
+      let logPath: string | undefined;
+      if (logHandle) {
+        const logLines = stopLogcat(logHandle);
+        if (logLines.length > 0) {
+          writeFileSync(join(outputDir, 'device.log'), logLines.join('\n'));
+          logPath = 'device.log';
+        }
+      }
+      const runResult: RunResult = {
+        id: runId,
+        flow: flow.name,
+        ...(flow.app ? { app: flow.app } : {}),
+        ...(flow.appUrl ? { appUrl: flow.appUrl } : {}),
+        device,
+        startedAt,
+        duration,
+        result: 'fail',
+        steps,
+        video: videoPath,
+        log: logPath,
+      };
+      writeFileSync(join(outputDir, 'run.json'), JSON.stringify(runResult, null, 2));
+      return runResult;
+    }
+  }
+
   // Execute each step
+  let bailedAt = -1; // index of step that caused bail, -1 = no bail
   for (let i = 0; i < flow.steps.length; i++) {
+    // If a prior step failed, skip remaining steps
+    if (bailedAt >= 0) {
+      steps.push({
+        index: i,
+        name: flow.steps[i].name,
+        action: getStepAction(flow.steps[i]),
+        status: 'skip',
+        timestamp: Date.now() - t0,
+        duration: 0,
+        elementCount: 0,
+        error: `skipped: step ${bailedAt + 1} failed`,
+      });
+      if (!options.json) {
+        console.log(`  ○ Step ${i + 1}: ${flow.steps[i].name} [skip] (step ${bailedAt + 1} failed)`);
+      }
+      continue;
+    }
+
     const step = flow.steps[i];
     const stepStart = Date.now();
     const timestamp = stepStart - t0;
@@ -60,7 +137,6 @@ export async function runFlow(flow: Flow, options: RunOptions): Promise<RunResul
         duration: Date.now() - stepStart,
       });
     } catch (err) {
-      // Step failed — mark and continue
       const snapshot = await safeSnapshot(bridge);
       steps.push({
         index: i,
@@ -74,10 +150,19 @@ export async function runFlow(flow: Flow, options: RunOptions): Promise<RunResul
       });
     }
 
+    const lastStep = steps[steps.length - 1];
     if (!options.json) {
-      const s = steps[steps.length - 1];
-      const icon = s.status === 'pass' ? '✓' : s.status === 'fail' ? '✗' : '○';
-      console.log(`  ${icon} Step ${i + 1}: ${s.name} [${s.status}] (${s.duration}ms, ${s.elementCount} elements)`);
+      const icon = lastStep.status === 'pass' ? '✓' : lastStep.status === 'fail' ? '✗' : '○';
+      console.log(`  ${icon} Step ${i + 1}: ${lastStep.name} [${lastStep.status}] (${lastStep.duration}ms, ${lastStep.elementCount} elements)`);
+    }
+
+    // Bail on failure — except for non-navigation actions that don't affect screen state
+    if (lastStep.status === 'fail') {
+      const action = lastStep.action;
+      const safeToContinue = action === 'back' || action === 'screenshot' || action === 'assert';
+      if (!safeToContinue) {
+        bailedAt = i;
+      }
     }
   }
 
@@ -379,6 +464,40 @@ export async function dryRunFlow(flow: Flow, agentFlutterPath: string = 'agent-f
   });
 
   return { flow: flow.name, steps, dryRun: true };
+}
+
+/** Check if flow prerequisites are met */
+export function checkPrerequisites(
+  prerequisites: string[],
+  bridge: AgentBridge,
+): { met: boolean; failed?: string } {
+  for (const prereq of prerequisites) {
+    if (prereq === 'auth_ready') {
+      // auth_ready: app should be past sign-in, on the home/main screen
+      // Check for home screen indicators via text extraction
+      const texts = bridge.text();
+      const homeIndicators = ['today', 'home', 'featured', 'memories', 'chats'];
+      const hasHomeText = texts.some(t => {
+        const lower = t.toLowerCase();
+        return homeIndicators.some(ind => lower.includes(ind));
+      });
+      if (hasHomeText) continue;
+
+      // Also check for bottom nav presence (≥3 interactive elements near bottom)
+      try {
+        const snapshot = bridge.snapshot();
+        const bottomNav = snapshot.elements.filter(
+          e => e.bounds && e.bounds.y > 780 && e.bounds.height < 100
+        );
+        if (bottomNav.length >= 3) continue;
+      } catch { /* snapshot failed */ }
+
+      return { met: false, failed: prereq };
+    }
+
+    // Unknown prerequisite — skip (don't block on unrecognized names)
+  }
+  return { met: true };
 }
 
 async function safeSnapshot(bridge: AgentBridge): Promise<SnapshotElement[]> {
