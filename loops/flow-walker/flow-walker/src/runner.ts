@@ -1,8 +1,9 @@
 // Flow executor: runs YAML flows via agent-flutter
 
-import { join } from 'node:path';
-import { writeFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { writeFileSync, existsSync } from 'node:fs';
 import type { Flow, FlowStep, SnapshotElement } from './types.ts';
+import { parseFlowFile } from './flow-parser.ts';
 import { AgentBridge } from './agent-bridge.ts';
 import { generateRunId, type RunResult, type StepResult } from './run-schema.ts';
 import { screenshot as captureScreenshot, startRecording, stopRecording, startLogcat, stopLogcat, getDeviceName, ensureDir } from './capture.ts';
@@ -13,6 +14,7 @@ export interface RunOptions {
   noLogs?: boolean;
   json?: boolean;
   agentFlutterPath?: string;
+  flowFilePath?: string; // original flow file path (for resolving setup/ directory)
 }
 
 /** Execute a flow and produce a RunResult */
@@ -49,57 +51,69 @@ export async function runFlow(flow: Flow, options: RunOptions): Promise<RunResul
   if (flow.prerequisites && flow.prerequisites.length > 0) {
     const preCheck = checkPrerequisites(flow.prerequisites, bridge);
     if (!preCheck.met) {
-      // Skip entire flow — prerequisites not met
-      for (let i = 0; i < flow.steps.length; i++) {
-        steps.push({
-          index: i,
-          name: flow.steps[i].name,
-          action: getStepAction(flow.steps[i]),
-          status: 'skip',
-          timestamp: Date.now() - t0,
-          duration: 0,
-          elementCount: 0,
-          error: `prerequisite not met: ${preCheck.failed}`,
-        });
+      // Try to resolve by running setup flow
+      let setupResolved = false;
+      if (preCheck.failed && options.flowFilePath) {
+        setupResolved = await tryRunSetupFlow(preCheck.failed, options.flowFilePath, bridge, options);
+      }
+
+      if (!setupResolved) {
+        // Skip entire flow — prerequisites not met and no setup flow available
+        for (let i = 0; i < flow.steps.length; i++) {
+          steps.push({
+            index: i,
+            name: flow.steps[i].name,
+            action: getStepAction(flow.steps[i]),
+            status: 'skip',
+            timestamp: Date.now() - t0,
+            duration: 0,
+            elementCount: 0,
+            error: `prerequisite not met: ${preCheck.failed}`,
+          });
+        }
+
+        if (!options.json) {
+          console.log(`  ✗ Prerequisites not met: ${preCheck.failed}`);
+          for (const s of steps) {
+            console.log(`  ○ Step ${s.index + 1}: ${s.name} [skip]`);
+          }
+        }
+
+        // Skip to cleanup (video/logcat/write result)
+        const duration = Date.now() - t0;
+        let videoPath: string | undefined;
+        if (videoHandle) {
+          const localVideo = join(outputDir, 'recording.mp4');
+          if (stopRecording(videoHandle, localVideo)) videoPath = 'recording.mp4';
+        }
+        let logPath: string | undefined;
+        if (logHandle) {
+          const logLines = stopLogcat(logHandle);
+          if (logLines.length > 0) {
+            writeFileSync(join(outputDir, 'device.log'), logLines.join('\n'));
+            logPath = 'device.log';
+          }
+        }
+        const runResult: RunResult = {
+          id: runId,
+          flow: flow.name,
+          ...(flow.app ? { app: flow.app } : {}),
+          ...(flow.appUrl ? { appUrl: flow.appUrl } : {}),
+          device,
+          startedAt,
+          duration,
+          result: 'fail',
+          steps,
+          video: videoPath,
+          log: logPath,
+        };
+        writeFileSync(join(outputDir, 'run.json'), JSON.stringify(runResult, null, 2));
+        return runResult;
       }
 
       if (!options.json) {
-        console.log(`  ✗ Prerequisites not met: ${preCheck.failed}`);
-        for (const s of steps) {
-          console.log(`  ○ Step ${s.index + 1}: ${s.name} [skip]`);
-        }
+        console.log(`  ✓ Setup flow resolved prerequisite: ${preCheck.failed}`);
       }
-
-      // Skip to cleanup (video/logcat/write result)
-      const duration = Date.now() - t0;
-      let videoPath: string | undefined;
-      if (videoHandle) {
-        const localVideo = join(outputDir, 'recording.mp4');
-        if (stopRecording(videoHandle, localVideo)) videoPath = 'recording.mp4';
-      }
-      let logPath: string | undefined;
-      if (logHandle) {
-        const logLines = stopLogcat(logHandle);
-        if (logLines.length > 0) {
-          writeFileSync(join(outputDir, 'device.log'), logLines.join('\n'));
-          logPath = 'device.log';
-        }
-      }
-      const runResult: RunResult = {
-        id: runId,
-        flow: flow.name,
-        ...(flow.app ? { app: flow.app } : {}),
-        ...(flow.appUrl ? { appUrl: flow.appUrl } : {}),
-        device,
-        startedAt,
-        duration,
-        result: 'fail',
-        steps,
-        video: videoPath,
-        log: logPath,
-      };
-      writeFileSync(join(outputDir, 'run.json'), JSON.stringify(runResult, null, 2));
-      return runResult;
     }
   }
 
@@ -223,48 +237,127 @@ async function executeStep(
 
   // Execute the action
   if (step.press) {
-    const target = resolvePress(step.press, elements);
-    if (target) {
-      await bridge.press(target.ref);
-      await delay(1500); // wait for transition
+    if (step.press.text) {
+      // Text-based press via UIAutomator (works on system UI)
+      const ok = bridge.textPress(step.press.text);
+      if (!ok) {
+        return {
+          index: 0,
+          name: step.name,
+          action,
+          status: 'fail',
+          timestamp: 0,
+          duration: 0,
+          elementCount: elements.length,
+          error: `Text press target not found: "${step.press.text}"`,
+        };
+      }
+      await delay(1500);
       elements = await safeSnapshot(bridge);
     } else {
-      return {
-        index: 0, // filled by caller
-        name: step.name,
-        action,
-        status: 'fail',
-        timestamp: 0,
-        duration: 0,
-        elementCount: elements.length,
-        error: `Could not resolve press target: ${JSON.stringify(step.press)}`,
-      };
+      const target = resolvePress(step.press, elements);
+      if (target) {
+        await bridge.press(target.ref);
+        await delay(1500); // wait for transition
+        elements = await safeSnapshot(bridge);
+      } else {
+        return {
+          index: 0, // filled by caller
+          name: step.name,
+          action,
+          status: 'fail',
+          timestamp: 0,
+          duration: 0,
+          elementCount: elements.length,
+          error: `Could not resolve press target: ${JSON.stringify(step.press)}`,
+        };
+      }
     }
   } else if (step.scroll) {
     await bridge.scroll(step.scroll);
     await delay(1000);
     elements = await safeSnapshot(bridge);
   } else if (step.fill) {
-    const target = resolveFill(step.fill, elements);
-    if (target) {
-      await bridge.fill(target.ref, step.fill.value);
+    const fillValue = substituteEnvVars(step.fill.value);
+    if (step.fill.focused) {
+      // Type into currently focused field (no text matching)
+      const ok = bridge.textFillFocused(fillValue);
+      if (!ok) {
+        return {
+          index: 0,
+          name: step.name,
+          action,
+          status: 'fail',
+          timestamp: 0,
+          duration: 0,
+          elementCount: elements.length,
+          error: 'Failed to fill focused field',
+        };
+      }
+      await delay(500);
+      elements = await safeSnapshot(bridge);
+    } else if (step.fill.text) {
+      // Text-based fill via UIAutomator (works on system UI)
+      const ok = bridge.textFill(step.fill.text, fillValue);
+      if (!ok) {
+        return {
+          index: 0,
+          name: step.name,
+          action,
+          status: 'fail',
+          timestamp: 0,
+          duration: 0,
+          elementCount: elements.length,
+          error: `Text fill target not found: "${step.fill.text}"`,
+        };
+      }
       await delay(500);
       elements = await safeSnapshot(bridge);
     } else {
+      const target = resolveFill(step.fill, elements);
+      if (target) {
+        await bridge.fill(target.ref, fillValue);
+        await delay(500);
+        elements = await safeSnapshot(bridge);
+      } else {
+        return {
+          index: 0, // filled by caller
+          name: step.name,
+          action,
+          status: 'fail',
+          timestamp: 0,
+          duration: 0,
+          elementCount: elements.length,
+          error: `Could not resolve fill target: ${JSON.stringify(step.fill)}`,
+        };
+      }
+    }
+  } else if (step.back) {
+    await bridge.back();
+    await delay(1500);
+    elements = await safeSnapshot(bridge);
+  } else if (step.adb) {
+    const adbCommand = substituteEnvVars(step.adb);
+    const ok = bridge.adbExec(adbCommand);
+    if (!ok) {
       return {
-        index: 0, // filled by caller
+        index: 0,
         name: step.name,
         action,
         status: 'fail',
         timestamp: 0,
         duration: 0,
         elementCount: elements.length,
-        error: `Could not resolve fill target: ${JSON.stringify(step.fill)}`,
+        error: `ADB command failed: ${adbCommand}`,
       };
     }
-  } else if (step.back) {
-    await bridge.back();
-    await delay(1500);
+    await delay(2000); // ADB commands often need time (app restart, clear data)
+    elements = await safeSnapshot(bridge);
+  }
+
+  // Wait step (explicit delay, e.g. for OAuth redirects)
+  if (step.wait) {
+    await delay(step.wait * 1000);
     elements = await safeSnapshot(bridge);
   }
 
@@ -416,8 +509,10 @@ export function getStepAction(step: FlowStep): string {
   if (step.scroll) return 'scroll';
   if (step.fill) return 'fill';
   if (step.back) return 'back';
+  if (step.adb) return 'adb';
   if (step.assert) return 'assert';
   if (step.screenshot) return 'screenshot';
+  if (step.wait && !step.press && !step.fill && !step.scroll && !step.back) return 'wait';
   return 'unknown';
 }
 
@@ -500,6 +595,39 @@ export function checkPrerequisites(
   return { met: true };
 }
 
+/** Try to run a setup flow for a failed prerequisite */
+async function tryRunSetupFlow(
+  prereq: string,
+  flowFilePath: string,
+  bridge: AgentBridge,
+  options: RunOptions,
+): Promise<boolean> {
+  // Look for setup/{prereq}.yaml relative to the flow file's directory
+  const flowDir = dirname(flowFilePath);
+  const setupPath = join(flowDir, 'setup', `${prereq}.yaml`);
+
+  if (!existsSync(setupPath)) return false;
+
+  if (!options.json) {
+    console.log(`  → Running setup flow: ${setupPath}`);
+  }
+
+  try {
+    const setupFlow = parseFlowFile(setupPath);
+
+    // Execute setup flow steps directly (no video/logs, just actions)
+    for (const step of setupFlow.steps) {
+      await executeStep(step, bridge, options.outputDir, 0);
+    }
+
+    // Re-check prerequisite after setup
+    const recheck = checkPrerequisites([prereq], bridge);
+    return recheck.met;
+  } catch {
+    return false;
+  }
+}
+
 async function safeSnapshot(bridge: AgentBridge): Promise<SnapshotElement[]> {
   try {
     const snapshot = await bridge.snapshot();
@@ -511,4 +639,11 @@ async function safeSnapshot(bridge: AgentBridge): Promise<SnapshotElement[]> {
 
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Substitute $ENV_VAR references in a string with values from process.env */
+export function substituteEnvVars(value: string): string {
+  return value.replace(/\$([A-Z_][A-Z0-9_]*)/g, (_match, name) => {
+    return process.env[name] ?? '';
+  });
 }

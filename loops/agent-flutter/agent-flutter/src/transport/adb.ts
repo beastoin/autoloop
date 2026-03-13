@@ -43,6 +43,12 @@ export class AdbTransport implements DeviceTransport {
     this.exec(`shell input keyevent ${code}`);
   }
 
+  inputText(text: string): void {
+    // Escape special shell characters for ADB input text
+    const escaped = text.replace(/([\\'"` $!&|;()<>{}[\]#*?~])/g, '\\$1');
+    this.exec(`shell input text "${escaped}"`, { timeout: 5000 });
+  }
+
   screenshot(): Buffer {
     return this.execRaw('shell screencap -p');
   }

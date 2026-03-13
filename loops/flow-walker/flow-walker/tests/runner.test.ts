@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolvePress, resolveFill, getStepAction, checkPrerequisites } from '../src/runner.ts';
+import { resolvePress, resolveFill, getStepAction, checkPrerequisites, substituteEnvVars } from '../src/runner.ts';
 import type { SnapshotElement, FlowStep } from '../src/types.ts';
 
 const makeElement = (overrides: Partial<SnapshotElement> = {}): SnapshotElement => ({
@@ -39,6 +39,18 @@ describe('getStepAction', () => {
 
   it('returns "unknown" for empty step', () => {
     assert.equal(getStepAction({ name: 'x' }), 'unknown');
+  });
+
+  it('returns "adb" for adb step', () => {
+    assert.equal(getStepAction({ name: 'x', adb: 'shell pm clear com.example' }), 'adb');
+  });
+
+  it('returns "wait" for wait-only step', () => {
+    assert.equal(getStepAction({ name: 'x', wait: 3 }), 'wait');
+  });
+
+  it('returns "press" for press step with wait', () => {
+    assert.equal(getStepAction({ name: 'x', press: { text: 'Next' }, wait: 2 }), 'press');
   });
 });
 
@@ -155,6 +167,35 @@ describe('bail-on-failure: action safety classification', () => {
 describe('checkPrerequisites export', () => {
   it('is exported as a function', () => {
     assert.equal(typeof checkPrerequisites, 'function');
+  });
+});
+
+describe('substituteEnvVars', () => {
+  it('replaces $VAR with env value', () => {
+    process.env.TEST_SUB_VAR = 'hello';
+    assert.equal(substituteEnvVars('$TEST_SUB_VAR'), 'hello');
+    delete process.env.TEST_SUB_VAR;
+  });
+
+  it('replaces multiple vars', () => {
+    process.env.TEST_A = 'foo';
+    process.env.TEST_B = 'bar';
+    assert.equal(substituteEnvVars('$TEST_A@$TEST_B'), 'foo@bar');
+    delete process.env.TEST_A;
+    delete process.env.TEST_B;
+  });
+
+  it('replaces missing var with empty string', () => {
+    delete process.env.NONEXISTENT_VAR_XYZ;
+    assert.equal(substituteEnvVars('user: $NONEXISTENT_VAR_XYZ'), 'user: ');
+  });
+
+  it('leaves strings without $ unchanged', () => {
+    assert.equal(substituteEnvVars('no variables here'), 'no variables here');
+  });
+
+  it('only matches uppercase/underscore var names', () => {
+    assert.equal(substituteEnvVars('$lowercase'), '$lowercase');
   });
 });
 

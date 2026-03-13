@@ -719,6 +719,10 @@ var init_adb = __esm({
         const code = key === "back" ? 4 : 3;
         this.exec(`shell input keyevent ${code}`);
       }
+      inputText(text) {
+        const escaped = text.replace(/([\\'"` $!&|;()<>{}[\]#*?~])/g, "\\$1");
+        this.exec(`shell input text "${escaped}"`, { timeout: 5e3 });
+      }
       screenshot() {
         return this.execRaw("shell screencap -p");
       }
@@ -979,6 +983,17 @@ end tell'`, { encoding: "utf8", timeout: 5e3, stdio: ["pipe", "pipe", "pipe"] })
           return;
         }
         throw new Error("Cannot swipe on iOS simulator. Install cliclick: brew install cliclick");
+      }
+      inputText(text) {
+        try {
+          this.simctl(`io ${this.deviceId} sendtext "${text.replace(/"/g, '\\"')}"`);
+        } catch {
+          execSync3(`osascript -e 'tell application "System Events" to keystroke "${text.replace(/"/g, '\\"')}"'`, {
+            encoding: "utf8",
+            timeout: 5e3,
+            stdio: ["pipe", "pipe", "pipe"]
+          });
+        }
       }
       keyevent(key) {
         if (key === "home") {
@@ -2243,12 +2258,83 @@ async function textCommand(args) {
   }
   const isJson = args.includes("--json") || process.env.AGENT_FLUTTER_JSON === "1";
   const isAll = args.includes("--all");
-  const query = args.filter((a) => !a.startsWith("--")).join(" ").trim() || null;
+  const isPress = args.includes("--press");
+  const isFocused = args.includes("--focused");
+  const fillIdx = args.indexOf("--fill");
+  const fillValue = fillIdx >= 0 && fillIdx + 1 < args.length ? args[fillIdx + 1] : null;
+  const isFill = fillIdx >= 0;
+  const skipNext = /* @__PURE__ */ new Set();
+  if (fillIdx >= 0) skipNext.add(fillIdx + 1);
+  const query = args.filter((a, i) => !a.startsWith("--") && !skipNext.has(i)).join(" ").trim() || null;
+  const transport = resolveTransport();
+  if (isFill && isFocused && fillValue !== null) {
+    if (transport.platform !== "android") {
+      if (isJson) {
+        console.log(JSON.stringify({ error: "fill --focused requires Android (ADB)" }));
+      } else {
+        console.error("fill --focused requires Android (ADB)");
+      }
+      process.exit(2);
+      return;
+    }
+    transport.inputText(fillValue);
+    if (isJson) {
+      console.log(JSON.stringify({ action: "fill", focused: true, value: fillValue }));
+    } else {
+      console.log(`Filled focused field with "${fillValue}"`);
+    }
+    return;
+  }
+  if ((isPress || isFill) && query) {
+    if (transport.platform !== "android") {
+      if (isJson) {
+        console.log(JSON.stringify({ error: "press/fill via text requires Android (UIAutomator)" }));
+      } else {
+        console.error("press/fill via text requires Android (UIAutomator)");
+      }
+      process.exit(2);
+      return;
+    }
+    const uiEntries2 = transport.dumpText();
+    const lowerQuery = query.toLowerCase();
+    const match = uiEntries2.find((e) => e.text.toLowerCase().includes(lowerQuery));
+    if (!match) {
+      if (isJson) {
+        console.log(JSON.stringify({ found: false, action: isPress ? "press" : "fill", query }));
+      } else {
+        console.log(`Not found: "${query}"`);
+      }
+      process.exit(1);
+      return;
+    }
+    const [left, top, right, bottom] = match.bounds;
+    const centerX = Math.round((left + right) / 2);
+    const centerY = Math.round((top + bottom) / 2);
+    if (isPress) {
+      transport.tap(centerX, centerY);
+      if (isJson) {
+        console.log(JSON.stringify({ found: true, action: "press", query, text: match.text, x: centerX, y: centerY }));
+      } else {
+        console.log(`Pressed: "${match.text}" at (${centerX}, ${centerY})`);
+      }
+      return;
+    }
+    if (isFill && fillValue !== null) {
+      transport.tap(centerX, centerY);
+      await new Promise((r) => setTimeout(r, 300));
+      transport.inputText(fillValue);
+      if (isJson) {
+        console.log(JSON.stringify({ found: true, action: "fill", query, text: match.text, value: fillValue, x: centerX, y: centerY }));
+      } else {
+        console.log(`Filled: "${match.text}" with "${fillValue}" at (${centerX}, ${centerY})`);
+      }
+      return;
+    }
+  }
   let texts = [];
   let method = "uiautomator";
   let uiEntries = [];
   let semEntries = [];
-  const transport = resolveTransport();
   const session = loadSession();
   if (session) {
     transport.ensureAccessibility();
@@ -2344,6 +2430,11 @@ var init_text = __esm({
   Sources (session-aware priority):
     1. Flutter semantics tree (fast, needs active session \u2014 preferred)
     2. UIAutomator accessibility dump (Android, no session needed \u2014 fallback)
+
+  Actions:
+    --press            Find text via UIAutomator and tap it (works on system UI)
+    --fill "value"     Find text field by label, tap to focus, type value
+    --focused          With --fill: type into currently focused field (no text match needed)
 
   Options:
     --json    JSON output
@@ -2826,11 +2917,14 @@ var COMMAND_SCHEMAS = [
   },
   {
     name: "text",
-    description: "Extract visible text (UIAutomator \u2192 Flutter semantics fallback)",
+    description: "Extract visible text, search, or interact (semantics-first with UIAutomator fallback)",
     args: [{ name: "query", required: false, description: "Text to search for (substring, case-insensitive)" }],
     flags: [
       { name: "--json", description: "JSON output (includes method field: uiautomator or semantics)" },
-      { name: "--all", description: "Include source metadata (with --json)" }
+      { name: "--all", description: "Include source metadata (with --json)" },
+      { name: "--press", description: "Find text via UIAutomator and tap its bounds center (Android only)" },
+      { name: '--fill "value"', description: "Find text field by label via UIAutomator, tap to focus, type value (Android only)" },
+      { name: "--focused", description: "With --fill: type into currently focused field (no text match needed)" }
     ],
     exitCodes: { "0": "success (or text found)", "1": "text not found (search mode)", "2": "error" },
     examples: [
@@ -2838,7 +2932,10 @@ var COMMAND_SCHEMAS = [
       "agent-flutter text --json",
       'agent-flutter text "Featured"',
       'agent-flutter text "Sign In" --json',
-      "agent-flutter text --json --all"
+      "agent-flutter text --json --all",
+      'agent-flutter text "Next" --press',
+      'agent-flutter text "Email or phone" --fill "test@example.com"',
+      'agent-flutter text --fill "test@example.com" --focused'
     ]
   },
   {

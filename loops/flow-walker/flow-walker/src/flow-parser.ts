@@ -80,8 +80,14 @@ export function parseFlow(yamlContent: string): Flow {
       currentStep.fill = parseInlineObject(trimmed.slice(5).trim()) as FlowStep['fill'];
     } else if (trimmed.startsWith('back:')) {
       currentStep.back = parseScalarValue(trimmed.slice(5)) === 'true';
+    } else if (trimmed.startsWith('adb:')) {
+      currentStep.adb = parseScalarValue(trimmed.slice(4));
     } else if (trimmed.startsWith('screenshot:')) {
       currentStep.screenshot = parseScalarValue(trimmed.slice(11));
+    } else if (trimmed.startsWith('wait:')) {
+      const val = parseScalarValue(trimmed.slice(5));
+      const num = parseFloat(val);
+      if (!isNaN(num)) currentStep.wait = num;
     } else if (trimmed.startsWith('note:')) {
       currentStep.note = parseScalarValue(trimmed.slice(5));
     } else if (trimmed.startsWith('assert:')) {
