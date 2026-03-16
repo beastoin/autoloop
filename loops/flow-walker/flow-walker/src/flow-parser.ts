@@ -153,7 +153,8 @@ export function parseFlowV2(yamlContent: string): FlowV2 {
       const ei: Partial<FlowV2Evidence> = {};
       if (rest.startsWith('screenshot:')) ei.screenshot = pv(rest.slice(11));
       (currentStep.evidence as FlowV2Evidence[]).push(ei as FlowV2Evidence);
-    } else if (t.startsWith('note:')) currentStep.note = pv(t.slice(5));
+    } else if (t.startsWith('verify:')) currentStep.verify = pv(t.slice(7)) === 'true';
+    else if (t.startsWith('note:')) currentStep.note = pv(t.slice(5));
     else { for (const key of LEGACY_STEP_KEYS) { if (t.startsWith(`${key}:`)) currentStep[key] = t.slice(key.length + 1).trim(); } }
   }
   if (currentStep.id) flow.steps!.push(currentStep as unknown as FlowV2Step);

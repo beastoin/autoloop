@@ -86,6 +86,7 @@ export interface FlowV2Step {
   expect?: FlowV2Expect[];
   evidence?: FlowV2Evidence[];
   note?: string;
+  verify?: boolean;
 }
 
 export interface FlowV2 {

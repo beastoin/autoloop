@@ -33,7 +33,7 @@ const CORS_HEADERS = {
 };
 
 const TTL_DAYS = 30;
-const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20MB
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50MB
 const RATE_LIMIT_PER_DAY = 100;
 const STATS_KEY = 'stats.json';
 const MAX_RECENT_RUNS = 10;
