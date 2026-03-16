@@ -1,14 +1,15 @@
 /**
  * scroll @ref|up|down|left|right [amount] [--dry-run] — Scroll element into view or page scroll.
  */
-import { VmServiceClient } from '../vm-client.ts';
 import { loadSession, resolveRef } from '../session.ts';
 import { resolveTransport } from '../transport/index.ts';
 import { AgentFlutterError, ErrorCodes } from '../errors.ts';
+import { connectWithReconnect } from '../reconnect.ts';
 
 const HELP = `Usage: agent-flutter scroll <target>
 
   scroll @ref              Scroll element into view via Marionette
+  scroll --text "Sign Out" Scroll text into view (even if off-screen)
   scroll down [amount]     Scroll down (amount: multiplier, default 1)
   scroll up [amount]       Scroll up
   scroll left [amount]     Scroll left
@@ -26,10 +27,35 @@ export async function scrollCommand(args: string[]): Promise<void> {
   }
 
   const isDryRun = args.includes('--dry-run') || process.env.AGENT_FLUTTER_DRY_RUN === '1';
-  const positionals = args.filter((a) => a !== '--dry-run');
+
+  // Parse --text flag
+  const textIdx = args.indexOf('--text');
+  const textTarget = textIdx >= 0 && textIdx + 1 < args.length ? args[textIdx + 1] : null;
+
+  const positionals = args.filter((a, i) => a !== '--dry-run' && i !== textIdx && (textIdx < 0 || i !== textIdx + 1));
+
+  // --text mode: scroll text into view via Marionette
+  if (textTarget) {
+    const session = loadSession();
+    if (!session) throw new AgentFlutterError(ErrorCodes.NOT_CONNECTED, 'Not connected', 'Run: agent-flutter connect');
+
+    if (isDryRun) {
+      console.log(JSON.stringify({ dryRun: true, command: 'scroll', text: textTarget }));
+      return;
+    }
+
+    const client = await connectWithReconnect(session);
+    try {
+      await client.scrollTo({ type: 'Text', text: textTarget });
+      console.log(`Scrolled to text: ${textTarget}`);
+    } finally {
+      await client.disconnect();
+    }
+    return;
+  }
 
   if (positionals.length < 1) {
-    throw new AgentFlutterError(ErrorCodes.INVALID_ARGS, 'Usage: agent-flutter scroll <@ref|up|down|left|right>');
+    throw new AgentFlutterError(ErrorCodes.INVALID_ARGS, 'Usage: agent-flutter scroll <@ref|--text "..."|up|down|left|right>');
   }
 
   const target = positionals[0];
@@ -95,8 +121,7 @@ export async function scrollCommand(args: string[]): Promise<void> {
     return;
   }
 
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     if (el.key) {
       await client.scrollTo({ type: 'Key', keyValue: el.key });

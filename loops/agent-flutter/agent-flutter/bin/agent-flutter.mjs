@@ -620,6 +620,36 @@ var init_errors = __esm({
   }
 });
 
+// src/reconnect.ts
+async function connectWithReconnect(session) {
+  let client = new VmServiceClient();
+  try {
+    await client.connect(session.vmServiceUri);
+    return client;
+  } catch {
+    const newUri = await detectVmServiceUriAsync();
+    if (newUri) {
+      client = new VmServiceClient();
+      await client.connect(newUri);
+      session.vmServiceUri = newUri;
+      return client;
+    }
+    throw new AgentFlutterError(
+      ErrorCodes.NOT_CONNECTED,
+      "Connection failed \u2014 app may have restarted",
+      "Run: agent-flutter connect"
+    );
+  }
+}
+var init_reconnect = __esm({
+  "src/reconnect.ts"() {
+    "use strict";
+    init_vm_client();
+    init_auto_detect();
+    init_errors();
+  }
+});
+
 // src/text-parser.ts
 function parseUiAutomatorXml(xml) {
   const entries = [];
@@ -1179,8 +1209,7 @@ async function pressMarionette(positionals, isDryRun) {
     }));
     return;
   }
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     if (el.key) {
       await client.tap({ type: "Key", keyValue: el.key });
@@ -1268,10 +1297,10 @@ var HELP2;
 var init_press = __esm({
   "src/commands/press.ts"() {
     "use strict";
-    init_vm_client();
     init_session();
     init_transport();
     init_errors();
+    init_reconnect();
     HELP2 = `Usage: agent-flutter press @ref
        agent-flutter press <x> <y>
        agent-flutter press @ref --native
@@ -1318,8 +1347,7 @@ async function fillCommand(args) {
     }));
     return;
   }
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     if (el.key) {
       await client.enterText({ type: "Key", keyValue: el.key }, text);
@@ -1337,9 +1365,9 @@ var HELP3;
 var init_fill = __esm({
   "src/commands/fill.ts"() {
     "use strict";
-    init_vm_client();
     init_session();
     init_errors();
+    init_reconnect();
     HELP3 = `Usage: agent-flutter fill @ref "text"
 
   Enter text into a text field.
@@ -1451,8 +1479,7 @@ async function findCommand(args) {
   const value = filteredArgs[1];
   const action = filteredArgs[2];
   const actionArg = filteredArgs[3];
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     const elements = await client.getInteractiveElements();
     const { refs } = formatSnapshot(elements);
@@ -1555,10 +1582,10 @@ var HELP5;
 var init_find = __esm({
   "src/commands/find.ts"() {
     "use strict";
-    init_vm_client();
     init_session();
     init_snapshot_fmt();
     init_errors();
+    init_reconnect();
     HELP5 = `Usage: agent-flutter find <locator> <value> [action] [arg]
 
   Locators: key, text, type
@@ -1612,8 +1639,7 @@ async function waitCommand(args) {
   }
   const session = loadSession();
   if (!session) throw new AgentFlutterError(ErrorCodes.NOT_CONNECTED, "Not connected", "Run: agent-flutter connect");
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     const start = Date.now();
     while (Date.now() - start < timeout) {
@@ -1682,10 +1708,10 @@ var HELP6;
 var init_wait = __esm({
   "src/commands/wait.ts"() {
     "use strict";
-    init_vm_client();
     init_session();
     init_snapshot_fmt();
     init_errors();
+    init_reconnect();
     HELP6 = `Usage: agent-flutter wait <condition> <target> [options]
 
   wait exists @ref [--timeout-ms N] [--interval-ms N]   Wait for element to exist
@@ -1828,8 +1854,7 @@ async function scrollCommand(args) {
     }));
     return;
   }
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     if (el.key) {
       await client.scrollTo({ type: "Key", keyValue: el.key });
@@ -1849,10 +1874,10 @@ var HELP8, DIRECTIONS;
 var init_scroll = __esm({
   "src/commands/scroll.ts"() {
     "use strict";
-    init_vm_client();
     init_session();
     init_transport();
     init_errors();
+    init_reconnect();
     HELP8 = `Usage: agent-flutter scroll <target>
 
   scroll @ref              Scroll element into view via Marionette
@@ -2018,9 +2043,9 @@ async function screenshotCommand(args) {
   const outPath = args[0] ?? "screenshot.png";
   const session = loadSession();
   if (session) {
-    const client = new VmServiceClient();
+    let client;
     try {
-      await client.connect(session.vmServiceUri);
+      client = await connectWithReconnect(session);
       const buf = await client.takeScreenshot();
       if (buf) {
         writeFileSync2(outPath, buf);
@@ -2030,7 +2055,7 @@ async function screenshotCommand(args) {
     } catch {
     } finally {
       try {
-        await client.disconnect();
+        await client?.disconnect();
       } catch {
       }
     }
@@ -2048,10 +2073,10 @@ var HELP10;
 var init_screenshot = __esm({
   "src/commands/screenshot.ts"() {
     "use strict";
-    init_vm_client();
     init_session();
     init_transport();
     init_errors();
+    init_reconnect();
     HELP10 = `Usage: agent-flutter screenshot [path]
 
   Capture screenshot. Default: screenshot.png
@@ -2071,8 +2096,7 @@ async function reloadCommand(args) {
   }
   const session = loadSession();
   if (!session) throw new AgentFlutterError(ErrorCodes.NOT_CONNECTED, "Not connected", "Run: agent-flutter connect");
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     const success = await client.hotReload();
     console.log(success ? "Hot reload successful" : "Hot reload failed");
@@ -2084,9 +2108,9 @@ var HELP11;
 var init_reload = __esm({
   "src/commands/reload.ts"() {
     "use strict";
-    init_vm_client();
     init_session();
     init_errors();
+    init_reconnect();
     HELP11 = `Usage: agent-flutter reload
 
   Hot reload the Flutter app.`;
@@ -2105,8 +2129,7 @@ async function logsCommand(args) {
   }
   const session = loadSession();
   if (!session) throw new AgentFlutterError(ErrorCodes.NOT_CONNECTED, "Not connected", "Run: agent-flutter connect");
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  const client = await connectWithReconnect(session);
   try {
     const logs = await client.getLogs();
     if (logs.length === 0) {
@@ -2122,9 +2145,9 @@ var HELP12;
 var init_logs = __esm({
   "src/commands/logs.ts"() {
     "use strict";
-    init_vm_client();
     init_session();
     init_errors();
+    init_reconnect();
     HELP12 = `Usage: agent-flutter logs
 
   Get Flutter app logs.`;
@@ -2634,6 +2657,8 @@ init_vm_client();
 init_session();
 init_snapshot_fmt();
 init_errors();
+init_auto_detect();
+init_reconnect();
 var HELP = `Usage: agent-flutter snapshot [options]
 
   -i, --interactive   Show only interactive elements (buttons, textfields, etc.)
@@ -2654,10 +2679,21 @@ async function snapshotCommand(args) {
   const isDiff = args.includes("--diff");
   const isInteractive = args.includes("-i") || args.includes("--interactive");
   const isCompact = args.includes("-c") || args.includes("--compact");
-  const client = new VmServiceClient();
-  await client.connect(session.vmServiceUri);
+  let client = await connectWithReconnect(session);
   try {
     let elements = await client.getInteractiveElements();
+    if (elements.length === 0) {
+      try {
+        await client.disconnect();
+      } catch {
+      }
+      await new Promise((r) => setTimeout(r, 1e3));
+      const freshUri = await detectVmServiceUriAsync();
+      if (freshUri) session.vmServiceUri = freshUri;
+      client = new VmServiceClient();
+      await client.connect(session.vmServiceUri);
+      elements = await client.getInteractiveElements();
+    }
     if (isInteractive) {
       elements = filterInteractive(elements);
     }
