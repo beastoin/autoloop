@@ -18,7 +18,7 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
       { name: '--dry-run', type: 'boolean', description: 'Snapshot without pressing' },
       { name: '--skip-connect', type: 'boolean', description: 'Use existing session' },
     ] },
-  { name: 'record', description: 'Record agent execution events. init starts video recording automatically (use --no-video to disable). finish stops video and pulls recording.mp4 into run dir. Agent should save screenshots as step-{step_id}.png in run dir after each step for report embedding.', args: [{ name: 'sub', required: true, description: 'init, stream, or finish' }],
+  { name: 'record', description: 'Record agent execution events. init starts video recording automatically (use --no-video to disable). finish stops video and pulls recording.mp4 into run dir. Agent should save screenshots as step-{step_id}.webp (preferred, q70) or step-{step_id}.png in run dir after each step for report embedding. Use: adb exec-out screencap -p > /tmp/raw.png && cwebp -q 70 -resize 270 600 /tmp/raw.png -o <run-dir>/step-S1.webp', args: [{ name: 'sub', required: true, description: 'init, stream, or finish' }],
     flags: [
       { name: '--flow', type: 'path', description: 'Flow YAML path (init)' },
       { name: '--output-dir', type: 'path', description: 'Output directory', default: './runs/' },

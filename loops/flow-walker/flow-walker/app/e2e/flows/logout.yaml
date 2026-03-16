@@ -16,7 +16,7 @@ steps:
         kind: interactive_count
         min: 4
     evidence:
-      - screenshot: step-S1.png
+      - screenshot: step-S1.webp
 
   - id: S2
     name: Tap settings gear
@@ -25,7 +25,7 @@ steps:
       - milestone: settings drawer opens
         kind: screen
     evidence:
-      - screenshot: step-S2.png
+      - screenshot: step-S2.webp
 
   - id: S3
     name: Verify Sign Out visible
@@ -35,7 +35,7 @@ steps:
         kind: text_visible
         values: ["Sign Out"]
     evidence:
-      - screenshot: step-S3.png
+      - screenshot: step-S3.webp
 
   - id: S4
     name: Tap Sign Out
@@ -44,7 +44,7 @@ steps:
       - milestone: confirmation dialog appears
         kind: screen
     evidence:
-      - screenshot: step-S4.png
+      - screenshot: step-S4.webp
 
   - id: S5
     name: Verify confirmation dialog
@@ -54,7 +54,7 @@ steps:
         kind: text_visible
         values: ["Sign Out?", "Cancel", "Ok"]
     evidence:
-      - screenshot: step-S5.png
+      - screenshot: step-S5.webp
 
   - id: S6
     name: Confirm sign out
@@ -63,7 +63,7 @@ steps:
       - milestone: sign out completes
         kind: navigation
     evidence:
-      - screenshot: step-S6.png
+      - screenshot: step-S6.webp
 
   - id: S7
     name: Verify auth screen
@@ -73,4 +73,4 @@ steps:
         kind: text_visible
         values: ["Sign in with Google"]
     evidence:
-      - screenshot: step-S7.png
+      - screenshot: step-S7.webp
