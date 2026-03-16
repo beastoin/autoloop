@@ -24,7 +24,7 @@ export function recordInit(opts: RecordInitOptions): RecordInitResult {
     try {
       const adbArgs = opts.device ? ['-s', opts.device] : [];
       const deviceRecordPath = `/sdcard/fw-${id}.mp4`;
-      const proc = spawn('adb', [...adbArgs, 'shell', 'screenrecord', '--time-limit', '0', '--size', '720x1280', '--bit-rate', '2000000', deviceRecordPath], {
+      const proc = spawn('adb', [...adbArgs, 'shell', 'screenrecord', '--size', '720x1280', '--bit-rate', '2000000', deviceRecordPath], {
         stdio: 'ignore', detached: true,
       });
       proc.unref();
