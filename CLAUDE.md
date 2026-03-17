@@ -2,6 +2,16 @@
 
 Practical guide for Claude Code instances working in `beastoin/autoloop`.
 
+## Core design principles
+
+Every CLI built in autoloop follows these references:
+
+1. **Immutable eval + keep/revert loop** ([Karpathy: autoresearch](https://github.com/karpathy/autoresearch)) — program defines objective, eval.sh is the gate, code is the only mutable part. Never modify eval during an active loop.
+2. **Snapshot → @ref → action** ([agent-device](https://github.com/callstackincubator/agent-device), [agent-browser](https://github.com/vercel-labs/agent-browser)) — all interaction follows: take snapshot, get refs, act by ref. This is the UX contract for agent-flutter, agent-swift, and flow-walker.
+3. **Agent-friendly CLI design** ([Justin Poehnelt](https://justin.poehnelt.com/posts/rewrite-your-cli-for-ai-agents/)) — every command must have: schema discovery (`schema` command), input validation, deterministic output, structured errors with codes + hints, JSON mode, defense-in-depth.
+
+These are non-negotiable. When adding commands or features, check: does it have schema? Is output deterministic? Is input validated? Does it follow snapshot → @ref → action?
+
 ## Project map
 
 - `loops/` — one directory per build loop (each has its own README, CLAUDE.md, AGENTS.md)
