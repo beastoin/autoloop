@@ -40,7 +40,7 @@ core_commands = {"doctor", "connect", "disconnect", "status", "snapshot", "press
 full_commands = {
     "doctor", "connect", "disconnect", "status", "snapshot", "press", "fill",
     "get", "find", "wait", "is", "scroll", "screenshot", "schema", "click",
-    "type", "swipe"
+    "type", "swipe", "record"
 }
 
 if mode == "json":
@@ -139,6 +139,9 @@ if [ -f "loops/agent-swift/program-phase10.md" ]; then
 fi
 if [ -f "loops/agent-swift/program-phase11.md" ]; then
   PHASE=12  # User-driven UX: type, swipe, compound find, multi-sim
+fi
+if [ -f "loops/agent-swift/program-phase12.md" ]; then
+  PHASE=13  # Screen video recording
 fi
 echo "phase:            $PHASE"
 
@@ -265,6 +268,12 @@ if [ "$CLI_STATUS" = "pass" ]; then
       fi
     done
   fi
+  if [ "$PHASE" -ge 13 ]; then
+    HELP_TOTAL=$((HELP_TOTAL + 1))
+    if command_exists_in_help "record"; then
+      HELP_PASS=$((HELP_PASS + 1))
+    fi
+  fi
   if [ "$HELP_PASS" -eq "$HELP_TOTAL" ]; then
     HELP_STATUS="pass"
     C_PASS=$((C_PASS + 1))
@@ -311,6 +320,12 @@ if [ "$CLI_STATUS" = "pass" ]; then
         PCH_PASS=$((PCH_PASS + 1))
       fi
     done
+  fi
+  if [ "$PHASE" -ge 13 ]; then
+    PCH_TOTAL=$((PCH_TOTAL + 1))
+    if "$BINARY_PATH" record --help > /dev/null 2>&1; then
+      PCH_PASS=$((PCH_PASS + 1))
+    fi
   fi
   C_TOTAL=$((C_TOTAL + 1))
   if [ "$PCH_PASS" -eq "$PCH_TOTAL" ]; then
@@ -401,6 +416,22 @@ if [ "$CLI_STATUS" = "pass" ]; then
     fi
   fi
 
+  if [ "$PHASE" -ge 13 ]; then
+    # record status --json returns valid JSON
+    J_TOTAL=$((J_TOTAL + 1))
+    "$BINARY_PATH" record status --json > /tmp/as-eval-record-status.json 2>&1 || true
+    if json_check /tmp/as-eval-record-status.json json; then
+      J_PASS=$((J_PASS + 1))
+    fi
+
+    # record stop --json returns valid JSON (error expected — no active recording)
+    J_TOTAL=$((J_TOTAL + 1))
+    "$BINARY_PATH" record stop --json > /tmp/as-eval-record-stop.json 2>&1 || true
+    if json_check /tmp/as-eval-record-stop.json json; then
+      J_PASS=$((J_PASS + 1))
+    fi
+  fi
+
   C_TOTAL=$((C_TOTAL + 1))
   if [ "$J_PASS" -eq "$J_TOTAL" ]; then
     JSON_STATUS="pass"
@@ -470,19 +501,45 @@ if [ "$CLI_STATUS" = "pass" ]; then
   fi
 
   if [ "$PHASE" -ge 12 ]; then
-    # type without session should exit 2
+    # type without session should exit 2 (use clean session dir)
     E_TOTAL=$((E_TOTAL + 1))
-    "$BINARY_PATH" type "test" > /dev/null 2>&1
+    CLEAN_HOME=$(mktemp -d)
+    AGENT_SWIFT_HOME="$CLEAN_HOME" "$BINARY_PATH" type "test" > /dev/null 2>&1
     TYPE_EC=$?
+    rm -rf "$CLEAN_HOME"
     if [ "$TYPE_EC" -eq 2 ]; then
       E_PASS=$((E_PASS + 1))
     fi
 
-    # swipe without session should exit 2
+    # swipe without session should exit 2 (use clean session dir)
     E_TOTAL=$((E_TOTAL + 1))
-    "$BINARY_PATH" swipe 0 0 0 100 > /dev/null 2>&1
+    CLEAN_HOME=$(mktemp -d)
+    AGENT_SWIFT_HOME="$CLEAN_HOME" "$BINARY_PATH" swipe 0 0 0 100 > /dev/null 2>&1
     SWIPE_EC=$?
+    rm -rf "$CLEAN_HOME"
     if [ "$SWIPE_EC" -eq 2 ]; then
+      E_PASS=$((E_PASS + 1))
+    fi
+  fi
+
+  if [ "$PHASE" -ge 13 ]; then
+    # record stop without active recording should exit 2 (use clean session dir)
+    E_TOTAL=$((E_TOTAL + 1))
+    CLEAN_HOME=$(mktemp -d)
+    AGENT_SWIFT_HOME="$CLEAN_HOME" "$BINARY_PATH" record stop > /dev/null 2>&1
+    RECORD_STOP_EC=$?
+    rm -rf "$CLEAN_HOME"
+    if [ "$RECORD_STOP_EC" -eq 2 ]; then
+      E_PASS=$((E_PASS + 1))
+    fi
+
+    # record frame without recording should exit 2 (use clean session dir)
+    E_TOTAL=$((E_TOTAL + 1))
+    CLEAN_HOME=$(mktemp -d)
+    AGENT_SWIFT_HOME="$CLEAN_HOME" "$BINARY_PATH" record frame --at 1.0 > /dev/null 2>&1
+    RECORD_FRAME_EC=$?
+    rm -rf "$CLEAN_HOME"
+    if [ "$RECORD_FRAME_EC" -eq 2 ]; then
       E_PASS=$((E_PASS + 1))
     fi
   fi
@@ -1355,6 +1412,109 @@ if [ "$PHASE" -ge 12 ] && [ "$CLI_STATUS" = "pass" ]; then
 fi
 echo "p12_user_ux:      $P12_USER_UX"
 
+# Phase 13 gates: Screen video recording
+P13_RECORDING="skip"
+if [ "$PHASE" -ge 13 ] && [ "$CLI_STATUS" = "pass" ]; then
+  P13_PASS=0
+  P13_TOTAL=0
+
+  # Gate 1: record command exists in help
+  P13_TOTAL=$((P13_TOTAL + 1))
+  if command_exists_in_help "record"; then
+    P13_PASS=$((P13_PASS + 1))
+  fi
+
+  # Gate 2: record --help shows start, stop, frame, status subcommands
+  P13_TOTAL=$((P13_TOTAL + 1))
+  "$BINARY_PATH" record --help > /tmp/as-eval-record-help.txt 2>&1 || true
+  REC_SUBS=0
+  for SUB in start stop frame status; do
+    if grep -qi "$SUB" /tmp/as-eval-record-help.txt 2>/dev/null; then
+      REC_SUBS=$((REC_SUBS + 1))
+    fi
+  done
+  if [ "$REC_SUBS" -ge 4 ]; then
+    P13_PASS=$((P13_PASS + 1))
+  fi
+
+  # Gate 3: record appears in schema output
+  P13_TOTAL=$((P13_TOTAL + 1))
+  "$BINARY_PATH" schema > /tmp/as-eval-schema13.json 2>&1 || true
+  if python3 -c "import json; d=json.load(open('/tmp/as-eval-schema13.json')); assert any(c.get('name')=='record' for c in d)" 2>/dev/null; then
+    P13_PASS=$((P13_PASS + 1))
+  fi
+
+  # Gate 4: RecordingSession in SessionStore.swift
+  P13_TOTAL=$((P13_TOTAL + 1))
+  if grep -q "RecordingSession\|recordingSession\|recording" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Session/SessionStore.swift" 2>/dev/null; then
+    P13_PASS=$((P13_PASS + 1))
+  fi
+
+  # Gate 5: record status --json returns valid JSON
+  P13_TOTAL=$((P13_TOTAL + 1))
+  "$BINARY_PATH" record status --json > /tmp/as-eval-record-status13.json 2>&1 || true
+  if json_check /tmp/as-eval-record-status13.json json; then
+    P13_PASS=$((P13_PASS + 1))
+  fi
+
+  # Gate 6: record stop without recording exits 2 (use clean session dir)
+  P13_TOTAL=$((P13_TOTAL + 1))
+  CLEAN_HOME=$(mktemp -d)
+  AGENT_SWIFT_HOME="$CLEAN_HOME" "$BINARY_PATH" record stop --json > /tmp/as-eval-record-stop13.json 2>&1
+  STOP_EC=$?
+  rm -rf "$CLEAN_HOME"
+  if [ "$STOP_EC" -eq 2 ]; then
+    P13_PASS=$((P13_PASS + 1))
+  fi
+
+  # Gate 7: ffmpeg check referenced in source (graceful error)
+  P13_TOTAL=$((P13_TOTAL + 1))
+  if grep -q "ffmpeg" "$AGENT_SWIFT_DIR/Sources/agent-swift/main.swift" 2>/dev/null; then
+    P13_PASS=$((P13_PASS + 1))
+  fi
+
+  # Gate 8: simctl recordVideo referenced in source
+  P13_TOTAL=$((P13_TOTAL + 1))
+  if grep -q "recordVideo" "$AGENT_SWIFT_DIR/Sources/agent-swift/main.swift" 2>/dev/null || \
+     grep -q "recordVideo" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/SimulatorBridge.swift" 2>/dev/null; then
+    P13_PASS=$((P13_PASS + 1))
+  fi
+
+  # Gate 9: version is 0.8.x or higher
+  P13_TOTAL=$((P13_TOTAL + 1))
+  VERSION_OUT=$("$BINARY_PATH" --version 2>&1 || true)
+  if echo "$VERSION_OUT" | grep -qE "0\.[8-9]\.[0-9]+|0\.[1-9][0-9]+\.[0-9]+|[1-9]+\.[0-9]+\.[0-9]+"; then
+    P13_PASS=$((P13_PASS + 1))
+  fi
+
+  # Gate 10: RecordingTests.swift exists
+  P13_TOTAL=$((P13_TOTAL + 1))
+  if [ -f "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/RecordingTests.swift" ]; then
+    P13_PASS=$((P13_PASS + 1))
+  fi
+
+  # Gate 11: >= 15 XCTAssert calls in RecordingTests
+  P13_TOTAL=$((P13_TOTAL + 1))
+  REC_ASSERTIONS=$(grep -cE "XCTAssert" "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/RecordingTests.swift" 2>/dev/null || echo "0")
+  if [ "$REC_ASSERTIONS" -ge 15 ]; then
+    P13_PASS=$((P13_PASS + 1))
+  fi
+
+  # Gate 12: Tests >= 165
+  P13_TOTAL=$((P13_TOTAL + 1))
+  TEST_NUM=$(echo "$TEST_COUNT" | tr -dc '0-9')
+  if [ "$TEST_NUM" -ge 165 ]; then
+    P13_PASS=$((P13_PASS + 1))
+  fi
+
+  if [ "$P13_PASS" -eq "$P13_TOTAL" ]; then
+    P13_RECORDING="pass"
+  else
+    P13_RECORDING="fail ($P13_PASS/$P13_TOTAL)"
+  fi
+fi
+echo "p13_recording:    $P13_RECORDING"
+
 # Step 5: E2E test (optional; enabled when e2e-test.sh exists)
 E2E_STATUS="skip"
 if [ -x "loops/agent-swift/e2e-test.sh" ]; then
@@ -1512,6 +1672,24 @@ if [ "$BUILD_STATUS" = "pass" ] && [ "$TEST_STATUS" = "pass" ] && [ "$CONTRACT_S
          [ "$P10_MIRROR" = "pass" ] && \
          [ "$P11_CGEVENT_SIM" = "pass" ] && \
          [ "$P12_USER_UX" = "pass" ]; then
+        PHASE_COMPLETE="yes"
+      fi
+      ;;
+    13)
+      if [ "$HELP_STATUS" = "pass" ] && \
+         [ "$JSON_STATUS" = "pass" ] && \
+         [ "$EXIT_STATUS" = "pass" ] && \
+         [ "$P3_INTERACTION" = "pass" ] && \
+         [ "$P4_AUTONOMY" = "pass" ] && \
+         [ "$P5_POLISH" = "pass" ] && \
+         [ "$P2B_WIDGET" = "pass" ] && \
+         [ "$P7_CLICK" = "pass" ] && \
+         [ "$P8_SIMULATOR" = "pass" ] && \
+         [ "$P9_IDB" = "pass" ] && \
+         [ "$P10_MIRROR" = "pass" ] && \
+         [ "$P11_CGEVENT_SIM" = "pass" ] && \
+         [ "$P12_USER_UX" = "pass" ] && \
+         [ "$P13_RECORDING" = "pass" ]; then
         PHASE_COMPLETE="yes"
       fi
       ;;

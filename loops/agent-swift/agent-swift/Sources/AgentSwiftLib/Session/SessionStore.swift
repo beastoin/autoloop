@@ -1,5 +1,21 @@
 import Foundation
 
+public struct RecordingSession: Codable {
+    public var sessionId: String
+    public var pid: Int32
+    public var videoPath: String
+    public var startTime: String
+    public var mode: String  // "simulator", "desktop", "mirror"
+
+    public init(sessionId: String, pid: Int32, videoPath: String, startTime: String, mode: String) {
+        self.sessionId = sessionId
+        self.pid = pid
+        self.videoPath = videoPath
+        self.startTime = startTime
+        self.mode = mode
+    }
+}
+
 public struct SessionData: Codable {
     public var pid: Int?
     public var bundleId: String?
@@ -7,6 +23,10 @@ public struct SessionData: Codable {
     public var refs: [String: RefEntry]
     public var lastSnapshotAt: String?
     public var interactiveSnapshot: Bool?
+    public var simulatorUDID: String?
+    public var simulatorDeviceType: String?
+    public var mirrorMode: Bool?
+    public var recording: RecordingSession?
 
     public struct RefEntry: Codable {
         public let role: String
@@ -14,7 +34,7 @@ public struct SessionData: Codable {
         public let identifier: String?
         public let enabled: Bool
         public let focused: Bool
-        let bounds: Bounds?
+        public let bounds: Bounds?
         public let actions: [String]
 
         public init(role: String, label: String?, identifier: String?, enabled: Bool,
@@ -37,11 +57,19 @@ public struct SessionData: Codable {
     }
 
     public var isConnected: Bool {
-        return pid != nil
+        return pid != nil || simulatorUDID != nil || mirrorMode == true
+    }
+
+    public var isSimulatorMode: Bool {
+        return simulatorUDID != nil
+    }
+
+    public var isMirrorMode: Bool {
+        return mirrorMode == true
     }
 
     public static var empty: SessionData {
-        return SessionData(pid: nil, bundleId: nil, connectedAt: nil, refs: [:], lastSnapshotAt: nil, interactiveSnapshot: nil)
+        return SessionData(pid: nil, bundleId: nil, connectedAt: nil, refs: [:], lastSnapshotAt: nil, interactiveSnapshot: nil, simulatorUDID: nil, simulatorDeviceType: nil, mirrorMode: nil, recording: nil)
     }
 }
 
