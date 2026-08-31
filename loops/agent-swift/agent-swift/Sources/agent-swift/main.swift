@@ -2142,6 +2142,9 @@ struct RecordStartCommand: ParsableCommand {
 
     @OptionGroup var globals: GlobalOptions
 
+    @Option(name: .long, help: "Output video file path (default: ~/.agent-swift/recording-<sessionId>.mp4)")
+    var output: String?
+
     struct StartResult: Codable {
         let sessionId: String
         let videoPath: String
@@ -2168,16 +2171,25 @@ struct RecordStartCommand: ParsableCommand {
         let sessionId = String(UUID().uuidString.prefix(8)).lowercased()
         let now = ISO8601DateFormatter().string(from: Date())
 
-        // Determine session dir for video output
-        let sessionDir: String
-        if let home = ProcessInfo.processInfo.environment["AGENT_SWIFT_HOME"] {
-            sessionDir = home
+        let videoPath: String
+        if let customPath = output {
+            // Ensure parent directory exists
+            let parentDir = (customPath as NSString).deletingLastPathComponent
+            if !parentDir.isEmpty {
+                try FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
+            }
+            videoPath = customPath
         } else {
-            sessionDir = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".agent-swift").path
+            let sessionDir: String
+            if let home = ProcessInfo.processInfo.environment["AGENT_SWIFT_HOME"] {
+                sessionDir = home
+            } else {
+                sessionDir = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent(".agent-swift").path
+            }
+            try FileManager.default.createDirectory(atPath: sessionDir, withIntermediateDirectories: true)
+            videoPath = "\(sessionDir)/recording-\(sessionId).mp4"
         }
-        try FileManager.default.createDirectory(atPath: sessionDir, withIntermediateDirectories: true)
-        let videoPath = "\(sessionDir)/recording-\(sessionId).mp4"
 
         let mode: String
         let recordProcess = Process()
@@ -2659,7 +2671,7 @@ func allSchemas() -> [CommandSchema] { return [
             .init(name: "--duration", type: "number", defaultValue: "0.3"),
             .init(name: "--json", type: "bool", defaultValue: "false")
         ], exitCodes: ["0": "success", "2": "error"]),
-    CommandSchema(name: "record", description: "Screen video recording (start/stop/frame/status). Frame lookback (--at past timestamp) only works after stop; during recording, frame returns live screenshot.",
+    CommandSchema(name: "record", description: "Screen video recording (start/stop/frame/status). Frame lookback (--at past timestamp) only works after stop; during recording, frame returns live screenshot. Use start --output to set video path.",
         args: [],
         flags: [
             .init(name: "--at", type: "number", defaultValue: nil),
