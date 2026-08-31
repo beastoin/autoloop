@@ -2114,6 +2114,20 @@ struct RecordCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "record",
         abstract: "Screen video recording",
+        discussion: """
+            Record screen video and extract frames at any timestamp.
+
+            Workflow:
+              1. record start       → begin recording
+              2. record frame --at 0  → live screenshot (current screen only)
+              3. record stop        → finalize video
+              4. record frame --at 4  → extract frame at 4th second from video
+
+            NOTE: Frame lookback (--at a past timestamp) is only available AFTER
+            record stop. During recording, record frame returns a live screenshot
+            of the current screen regardless of --at value. Plan your workflow:
+            record first, then extract any frame you need from the finished video.
+            """,
         subcommands: [
             RecordStartCommand.self,
             RecordStopCommand.self,
@@ -2324,7 +2338,15 @@ struct RecordStopCommand: ParsableCommand {
 }
 
 struct RecordFrameCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "frame", abstract: "Extract frame from recording at timestamp")
+    static let configuration = CommandConfiguration(
+        commandName: "frame",
+        abstract: "Extract frame from recording at timestamp",
+        discussion: """
+            During recording: returns a live screenshot (current screen).
+            After record stop: extracts the exact frame at --at timestamp from the finalized video.
+            Lookback to a past timestamp requires stopping the recording first.
+            """
+    )
 
     @OptionGroup var globals: GlobalOptions
 
@@ -2637,7 +2659,7 @@ func allSchemas() -> [CommandSchema] { return [
             .init(name: "--duration", type: "number", defaultValue: "0.3"),
             .init(name: "--json", type: "bool", defaultValue: "false")
         ], exitCodes: ["0": "success", "2": "error"]),
-    CommandSchema(name: "record", description: "Screen video recording (subcommands: start, stop, frame, status)",
+    CommandSchema(name: "record", description: "Screen video recording (start/stop/frame/status). Frame lookback (--at past timestamp) only works after stop; during recording, frame returns live screenshot.",
         args: [],
         flags: [
             .init(name: "--at", type: "number", defaultValue: nil),
