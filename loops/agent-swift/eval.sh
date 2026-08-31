@@ -39,7 +39,8 @@ except Exception:
 core_commands = {"doctor", "connect", "disconnect", "status", "snapshot", "press"}
 full_commands = {
     "doctor", "connect", "disconnect", "status", "snapshot", "press", "fill",
-    "get", "find", "wait", "is", "scroll", "screenshot", "schema", "click"
+    "get", "find", "wait", "is", "scroll", "screenshot", "schema", "click",
+    "type", "swipe"
 }
 
 if mode == "json":
@@ -123,6 +124,21 @@ if [ -f "loops/agent-swift/program-phase2b.md" ]; then
 fi
 if [ -f "loops/agent-swift/program-phase6.md" ]; then
   PHASE=7  # click command
+fi
+if [ -f "loops/agent-swift/program-phase7.md" ]; then
+  PHASE=8  # simulator support
+fi
+if [ -f "loops/agent-swift/program-phase8.md" ]; then
+  PHASE=9  # idb transport
+fi
+if [ -f "loops/agent-swift/program-phase9.md" ]; then
+  PHASE=10  # iPhone Mirroring
+fi
+if [ -f "loops/agent-swift/program-phase10.md" ]; then
+  PHASE=11  # CGEvent Simulator interaction
+fi
+if [ -f "loops/agent-swift/program-phase11.md" ]; then
+  PHASE=12  # User-driven UX: type, swipe, compound find, multi-sim
 fi
 echo "phase:            $PHASE"
 
@@ -241,6 +257,14 @@ if [ "$CLI_STATUS" = "pass" ]; then
       HELP_PASS=$((HELP_PASS + 1))
     fi
   fi
+  if [ "$PHASE" -ge 12 ]; then
+    for CMD in type swipe; do
+      HELP_TOTAL=$((HELP_TOTAL + 1))
+      if command_exists_in_help "$CMD"; then
+        HELP_PASS=$((HELP_PASS + 1))
+      fi
+    done
+  fi
   if [ "$HELP_PASS" -eq "$HELP_TOTAL" ]; then
     HELP_STATUS="pass"
     C_PASS=$((C_PASS + 1))
@@ -279,6 +303,14 @@ if [ "$CLI_STATUS" = "pass" ]; then
     if "$BINARY_PATH" click --help > /dev/null 2>&1; then
       PCH_PASS=$((PCH_PASS + 1))
     fi
+  fi
+  if [ "$PHASE" -ge 12 ]; then
+    for CMD in type swipe; do
+      PCH_TOTAL=$((PCH_TOTAL + 1))
+      if "$BINARY_PATH" "$CMD" --help > /dev/null 2>&1; then
+        PCH_PASS=$((PCH_PASS + 1))
+      fi
+    done
   fi
   C_TOTAL=$((C_TOTAL + 1))
   if [ "$PCH_PASS" -eq "$PCH_TOTAL" ]; then
@@ -353,6 +385,22 @@ if [ "$CLI_STATUS" = "pass" ]; then
     fi
   fi
 
+  if [ "$PHASE" -ge 12 ]; then
+    # type --json returns valid JSON
+    J_TOTAL=$((J_TOTAL + 1))
+    "$BINARY_PATH" type "test" --json > /tmp/as-eval-type12.json 2>&1 || true
+    if json_check /tmp/as-eval-type12.json json; then
+      J_PASS=$((J_PASS + 1))
+    fi
+
+    # swipe --json returns valid JSON
+    J_TOTAL=$((J_TOTAL + 1))
+    "$BINARY_PATH" swipe 0 0 0 100 --json > /tmp/as-eval-swipe12.json 2>&1 || true
+    if json_check /tmp/as-eval-swipe12.json json; then
+      J_PASS=$((J_PASS + 1))
+    fi
+  fi
+
   C_TOTAL=$((C_TOTAL + 1))
   if [ "$J_PASS" -eq "$J_TOTAL" ]; then
     JSON_STATUS="pass"
@@ -417,6 +465,24 @@ if [ "$CLI_STATUS" = "pass" ]; then
     "$BINARY_PATH" click @e999999 > /dev/null 2>&1
     CLICK_EC=$?
     if [ "$CLICK_EC" -eq 2 ]; then
+      E_PASS=$((E_PASS + 1))
+    fi
+  fi
+
+  if [ "$PHASE" -ge 12 ]; then
+    # type without session should exit 2
+    E_TOTAL=$((E_TOTAL + 1))
+    "$BINARY_PATH" type "test" > /dev/null 2>&1
+    TYPE_EC=$?
+    if [ "$TYPE_EC" -eq 2 ]; then
+      E_PASS=$((E_PASS + 1))
+    fi
+
+    # swipe without session should exit 2
+    E_TOTAL=$((E_TOTAL + 1))
+    "$BINARY_PATH" swipe 0 0 0 100 > /dev/null 2>&1
+    SWIPE_EC=$?
+    if [ "$SWIPE_EC" -eq 2 ]; then
       E_PASS=$((E_PASS + 1))
     fi
   fi
@@ -652,10 +718,10 @@ if [ "$PHASE" -ge 5 ] && [ "$CLI_STATUS" = "pass" ]; then
   P5_PASS=0
   P5_TOTAL=0
 
-  # Gate 1: version is 0.2.x
+  # Gate 1: version is 0.2.x or higher (0.3.x for phase 8+)
   P5_TOTAL=$((P5_TOTAL + 1))
   VERSION_OUT=$("$BINARY_PATH" --version 2>&1 || true)
-  if echo "$VERSION_OUT" | grep -qE "0\.2\.[0-9]+"; then
+  if echo "$VERSION_OUT" | grep -qE "0\.[2-9]\.[0-9]+|0\.[1-9][0-9]+\.[0-9]+"; then
     P5_PASS=$((P5_PASS + 1))
   fi
 
@@ -800,10 +866,10 @@ if [ "$PHASE" -ge 7 ] && [ "$CLI_STATUS" = "pass" ]; then
     P7_PASS=$((P7_PASS + 1))
   fi
 
-  # Gate 2: version is 0.2.1
+  # Gate 2: version is 0.2.1 or higher (0.3.x for phase 8+)
   P7_TOTAL=$((P7_TOTAL + 1))
   VERSION_OUT=$("$BINARY_PATH" --version 2>&1 || true)
-  if echo "$VERSION_OUT" | grep -q "0.2.1"; then
+  if echo "$VERSION_OUT" | grep -qE "0\.(2\.1|[3-9]\.[0-9]+|[1-9][0-9]+\.[0-9]+)"; then
     P7_PASS=$((P7_PASS + 1))
   fi
 
@@ -861,6 +927,433 @@ if [ "$PHASE" -ge 7 ] && [ "$CLI_STATUS" = "pass" ]; then
   fi
 fi
 echo "p7_click:         $P7_CLICK"
+
+# Phase 8 gates: Simulator support
+P8_SIMULATOR="skip"
+if [ "$PHASE" -ge 8 ] && [ "$CLI_STATUS" = "pass" ]; then
+  P8_PASS=0
+  P8_TOTAL=0
+
+  # Gate 1: SimulatorBridge.swift exists
+  P8_TOTAL=$((P8_TOTAL + 1))
+  if [ -f "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/SimulatorBridge.swift" ]; then
+    P8_PASS=$((P8_PASS + 1))
+  fi
+
+  # Gate 2: connect --simulator flag in help
+  P8_TOTAL=$((P8_TOTAL + 1))
+  "$BINARY_PATH" connect --help > /tmp/as-eval-connect-help.txt 2>&1 || true
+  if grep -q "simulator" /tmp/as-eval-connect-help.txt 2>/dev/null; then
+    P8_PASS=$((P8_PASS + 1))
+  fi
+
+  # Gate 3: SessionStore has simulatorUDID field
+  P8_TOTAL=$((P8_TOTAL + 1))
+  if grep -q "simulatorUDID" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Session/SessionStore.swift" 2>/dev/null; then
+    P8_PASS=$((P8_PASS + 1))
+  fi
+
+  # Gate 4: version is 0.3.x
+  P8_TOTAL=$((P8_TOTAL + 1))
+  VERSION_OUT=$("$BINARY_PATH" --version 2>&1 || true)
+  if echo "$VERSION_OUT" | grep -qE "0\.[3-9]\.[0-9]+|0\.[1-9][0-9]+\.[0-9]+"; then
+    P8_PASS=$((P8_PASS + 1))
+  fi
+
+  # Gate 5: SimulatorTests.swift exists
+  P8_TOTAL=$((P8_TOTAL + 1))
+  if [ -f "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/SimulatorTests.swift" ]; then
+    P8_PASS=$((P8_PASS + 1))
+  fi
+
+  # Gate 6: >= 10 XCTAssert calls in SimulatorTests
+  P8_TOTAL=$((P8_TOTAL + 1))
+  SIM_ASSERTIONS=$(grep -cE "XCTAssert" "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/SimulatorTests.swift" 2>/dev/null || echo "0")
+  if [ "$SIM_ASSERTIONS" -ge 10 ]; then
+    P8_PASS=$((P8_PASS + 1))
+  fi
+
+  # Gate 7: Tests >= 78 (68 existing + 10 new)
+  P8_TOTAL=$((P8_TOTAL + 1))
+  TEST_NUM=$(echo "$TEST_COUNT" | tr -dc '0-9')
+  if [ "$TEST_NUM" -ge 78 ]; then
+    P8_PASS=$((P8_PASS + 1))
+  fi
+
+  # Gate 8: screenshot command references simctl (in source)
+  P8_TOTAL=$((P8_TOTAL + 1))
+  if grep -q "simctl" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/SimulatorBridge.swift" 2>/dev/null; then
+    P8_PASS=$((P8_PASS + 1))
+  fi
+
+  # Gate 9: iosPointToScreen coordinate mapping exists
+  P8_TOTAL=$((P8_TOTAL + 1))
+  if grep -q "iosPointToScreen" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/SimulatorBridge.swift" 2>/dev/null; then
+    P8_PASS=$((P8_PASS + 1))
+  fi
+
+  # Gate 10: status --json shows mode field when not connected (backwards compat)
+  P8_TOTAL=$((P8_TOTAL + 1))
+  "$BINARY_PATH" status --json > /tmp/as-eval-status-sim.json 2>&1 || true
+  if json_check /tmp/as-eval-status-sim.json object; then
+    P8_PASS=$((P8_PASS + 1))
+  fi
+
+  if [ "$P8_PASS" -eq "$P8_TOTAL" ]; then
+    P8_SIMULATOR="pass"
+  else
+    P8_SIMULATOR="fail ($P8_PASS/$P8_TOTAL)"
+  fi
+fi
+echo "p8_simulator:     $P8_SIMULATOR"
+
+# Phase 9 gates: idb transport
+P9_IDB="skip"
+if [ "$PHASE" -ge 9 ] && [ "$CLI_STATUS" = "pass" ]; then
+  P9_PASS=0
+  P9_TOTAL=0
+
+  # Gate 1: IdbBridge.swift exists
+  P9_TOTAL=$((P9_TOTAL + 1))
+  if [ -f "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/IdbBridge.swift" ]; then
+    P9_PASS=$((P9_PASS + 1))
+  fi
+
+  # Gate 2: IdbBridge has describeAll method
+  P9_TOTAL=$((P9_TOTAL + 1))
+  if grep -q "describeAll" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/IdbBridge.swift" 2>/dev/null; then
+    P9_PASS=$((P9_PASS + 1))
+  fi
+
+  # Gate 3: IdbBridge has tap method
+  P9_TOTAL=$((P9_TOTAL + 1))
+  if grep -qE "func tap\b" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/IdbBridge.swift" 2>/dev/null; then
+    P9_PASS=$((P9_PASS + 1))
+  fi
+
+  # Gate 4: IdbBridge has text method
+  P9_TOTAL=$((P9_TOTAL + 1))
+  if grep -qE "func text\b" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/IdbBridge.swift" 2>/dev/null; then
+    P9_PASS=$((P9_PASS + 1))
+  fi
+
+  # Gate 5: IdbBridge has swipe method
+  P9_TOTAL=$((P9_TOTAL + 1))
+  if grep -qE "func swipe\b" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/IdbBridge.swift" 2>/dev/null; then
+    P9_PASS=$((P9_PASS + 1))
+  fi
+
+  # Gate 6: IdbBridge has enableAccessibility method
+  P9_TOTAL=$((P9_TOTAL + 1))
+  if grep -q "enableAccessibility" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/IdbBridge.swift" 2>/dev/null; then
+    P9_PASS=$((P9_PASS + 1))
+  fi
+
+  # Gate 7: version is 0.4.x
+  P9_TOTAL=$((P9_TOTAL + 1))
+  VERSION_OUT=$("$BINARY_PATH" --version 2>&1 || true)
+  if echo "$VERSION_OUT" | grep -qE "0\.[4-9]\.[0-9]+|0\.[1-9][0-9]+\.[0-9]+"; then
+    P9_PASS=$((P9_PASS + 1))
+  fi
+
+  # Gate 8: IdbTests.swift exists
+  P9_TOTAL=$((P9_TOTAL + 1))
+  if [ -f "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/IdbTests.swift" ]; then
+    P9_PASS=$((P9_PASS + 1))
+  fi
+
+  # Gate 9: >= 15 XCTAssert calls in IdbTests
+  P9_TOTAL=$((P9_TOTAL + 1))
+  IDB_ASSERTIONS=$(grep -cE "XCTAssert" "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/IdbTests.swift" 2>/dev/null || echo "0")
+  if [ "$IDB_ASSERTIONS" -ge 15 ]; then
+    P9_PASS=$((P9_PASS + 1))
+  fi
+
+  # Gate 10: Tests >= 95 (85 existing + 10 new)
+  P9_TOTAL=$((P9_TOTAL + 1))
+  TEST_NUM=$(echo "$TEST_COUNT" | tr -dc '0-9')
+  if [ "$TEST_NUM" -ge 95 ]; then
+    P9_PASS=$((P9_PASS + 1))
+  fi
+
+  # Gate 11: IdbElement struct exists
+  P9_TOTAL=$((P9_TOTAL + 1))
+  if grep -q "struct IdbElement" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/IdbBridge.swift" 2>/dev/null; then
+    P9_PASS=$((P9_PASS + 1))
+  fi
+
+  # Gate 12: runIdb helper exists
+  P9_TOTAL=$((P9_TOTAL + 1))
+  if grep -q "runIdb" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/IdbBridge.swift" 2>/dev/null; then
+    P9_PASS=$((P9_PASS + 1))
+  fi
+
+  if [ "$P9_PASS" -eq "$P9_TOTAL" ]; then
+    P9_IDB="pass"
+  else
+    P9_IDB="fail ($P9_PASS/$P9_TOTAL)"
+  fi
+fi
+echo "p9_idb:           $P9_IDB"
+
+# Phase 10 gates: iPhone Mirroring
+P10_MIRROR="skip"
+if [ "$PHASE" -ge 10 ] && [ "$CLI_STATUS" = "pass" ]; then
+  P10_PASS=0
+  P10_TOTAL=0
+
+  # Gate 1: MirrorBridge.swift exists
+  P10_TOTAL=$((P10_TOTAL + 1))
+  if [ -f "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Mirror/MirrorBridge.swift" ]; then
+    P10_PASS=$((P10_PASS + 1))
+  fi
+
+  # Gate 2: MirrorBridge has screenshot method
+  P10_TOTAL=$((P10_TOTAL + 1))
+  if grep -qE "func screenshot\b" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Mirror/MirrorBridge.swift" 2>/dev/null; then
+    P10_PASS=$((P10_PASS + 1))
+  fi
+
+  # Gate 3: MirrorBridge has tap method
+  P10_TOTAL=$((P10_TOTAL + 1))
+  if grep -qE "func tap\b" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Mirror/MirrorBridge.swift" 2>/dev/null; then
+    P10_PASS=$((P10_PASS + 1))
+  fi
+
+  # Gate 4: MirrorBridge has swipe method
+  P10_TOTAL=$((P10_TOTAL + 1))
+  if grep -qE "func swipe\b" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Mirror/MirrorBridge.swift" 2>/dev/null; then
+    P10_PASS=$((P10_PASS + 1))
+  fi
+
+  # Gate 5: MirrorBridge has windowInfo method
+  P10_TOTAL=$((P10_TOTAL + 1))
+  if grep -q "windowInfo" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Mirror/MirrorBridge.swift" 2>/dev/null; then
+    P10_PASS=$((P10_PASS + 1))
+  fi
+
+  # Gate 6: MirrorBridge has iosPointToScreen coordinate mapping
+  P10_TOTAL=$((P10_TOTAL + 1))
+  if grep -q "iosPointToScreen" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Mirror/MirrorBridge.swift" 2>/dev/null; then
+    P10_PASS=$((P10_PASS + 1))
+  fi
+
+  # Gate 7: connect --mirror flag in help
+  P10_TOTAL=$((P10_TOTAL + 1))
+  "$BINARY_PATH" connect --help > /tmp/as-eval-connect-help10.txt 2>&1 || true
+  if grep -q "mirror" /tmp/as-eval-connect-help10.txt 2>/dev/null; then
+    P10_PASS=$((P10_PASS + 1))
+  fi
+
+  # Gate 8: version is 0.5.x or higher (forward-compatible)
+  P10_TOTAL=$((P10_TOTAL + 1))
+  VERSION_OUT=$("$BINARY_PATH" --version 2>&1 || true)
+  if echo "$VERSION_OUT" | grep -qE "0\.[5-9]\.[0-9]+|0\.[1-9][0-9]+\.[0-9]+|[1-9]+\.[0-9]+\.[0-9]+"; then
+    P10_PASS=$((P10_PASS + 1))
+  fi
+
+  # Gate 9: MirrorTests.swift exists
+  P10_TOTAL=$((P10_TOTAL + 1))
+  if [ -f "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/MirrorTests.swift" ]; then
+    P10_PASS=$((P10_PASS + 1))
+  fi
+
+  # Gate 10: >= 15 XCTAssert calls in MirrorTests
+  P10_TOTAL=$((P10_TOTAL + 1))
+  MIRROR_ASSERTIONS=$(grep -cE "XCTAssert" "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/MirrorTests.swift" 2>/dev/null || echo "0")
+  if [ "$MIRROR_ASSERTIONS" -ge 15 ]; then
+    P10_PASS=$((P10_PASS + 1))
+  fi
+
+  # Gate 11: Tests >= 110 (102 existing + 8 new)
+  P10_TOTAL=$((P10_TOTAL + 1))
+  TEST_NUM=$(echo "$TEST_COUNT" | tr -dc '0-9')
+  if [ "$TEST_NUM" -ge 110 ]; then
+    P10_PASS=$((P10_PASS + 1))
+  fi
+
+  # Gate 12: MirrorWindowInfo struct exists
+  P10_TOTAL=$((P10_TOTAL + 1))
+  if grep -q "struct MirrorWindowInfo" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Mirror/MirrorBridge.swift" 2>/dev/null; then
+    P10_PASS=$((P10_PASS + 1))
+  fi
+
+  if [ "$P10_PASS" -eq "$P10_TOTAL" ]; then
+    P10_MIRROR="pass"
+  else
+    P10_MIRROR="fail ($P10_PASS/$P10_TOTAL)"
+  fi
+fi
+echo "p10_mirror:       $P10_MIRROR"
+
+# Phase 11 gates: CGEvent Simulator interaction
+P11_CGEVENT_SIM="skip"
+if [ "$PHASE" -ge 11 ] && [ "$CLI_STATUS" = "pass" ]; then
+  P11_PASS=0
+  P11_TOTAL=0
+
+  # Gate 1: SimulatorBridge has CGEvent tap method
+  P11_TOTAL=$((P11_TOTAL + 1))
+  if grep -qE "func tap\b" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/SimulatorBridge.swift" 2>/dev/null; then
+    P11_PASS=$((P11_PASS + 1))
+  fi
+
+  # Gate 2: SimulatorBridge has CGEvent swipe method
+  P11_TOTAL=$((P11_TOTAL + 1))
+  if grep -qE "func swipe\b" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/SimulatorBridge.swift" 2>/dev/null; then
+    P11_PASS=$((P11_PASS + 1))
+  fi
+
+  # Gate 3: SimulatorBridge has directionToSwipeCoords
+  P11_TOTAL=$((P11_TOTAL + 1))
+  if grep -q "directionToSwipeCoords" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/SimulatorBridge.swift" 2>/dev/null; then
+    P11_PASS=$((P11_PASS + 1))
+  fi
+
+  # Gate 4: SimulatorBridge has activateSimulator private helper
+  P11_TOTAL=$((P11_TOTAL + 1))
+  if grep -q "activateSimulator" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/SimulatorBridge.swift" 2>/dev/null; then
+    P11_PASS=$((P11_PASS + 1))
+  fi
+
+  # Gate 5: CGEvent used in SimulatorBridge (not just IdbBridge)
+  P11_TOTAL=$((P11_TOTAL + 1))
+  if grep -q "CGEvent" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/SimulatorBridge.swift" 2>/dev/null; then
+    P11_PASS=$((P11_PASS + 1))
+  fi
+
+  # Gate 6: version is 0.6.x or higher (forward-compatible)
+  P11_TOTAL=$((P11_TOTAL + 1))
+  VERSION_OUT=$("$BINARY_PATH" --version 2>&1 || true)
+  if echo "$VERSION_OUT" | grep -qE "0\.[6-9]\.[0-9]+|0\.[1-9][0-9]+\.[0-9]+|[1-9]+\.[0-9]+\.[0-9]+"; then
+    P11_PASS=$((P11_PASS + 1))
+  fi
+
+  # Gate 7: Tests >= 130
+  P11_TOTAL=$((P11_TOTAL + 1))
+  TEST_NUM=$(echo "$TEST_COUNT" | tr -dc '0-9')
+  if [ "$TEST_NUM" -ge 130 ]; then
+    P11_PASS=$((P11_PASS + 1))
+  fi
+
+  # Gate 8: SimulatorTests has >= 20 assertions (original 10 + 10 new for CGEvent)
+  P11_TOTAL=$((P11_TOTAL + 1))
+  SIM_ASSERTIONS=$(grep -cE "XCTAssert" "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/SimulatorTests.swift" 2>/dev/null || echo "0")
+  if [ "$SIM_ASSERTIONS" -ge 20 ]; then
+    P11_PASS=$((P11_PASS + 1))
+  fi
+
+  # Gate 9: click in sim mode outputs screenPoint in JSON
+  P11_TOTAL=$((P11_TOTAL + 1))
+  if grep -q "screenPoint" "$AGENT_SWIFT_DIR/Sources/agent-swift/main.swift" 2>/dev/null; then
+    P11_PASS=$((P11_PASS + 1))
+  fi
+
+  # Gate 10: scroll in sim mode uses SimulatorBridge swipe (not just idb)
+  P11_TOTAL=$((P11_TOTAL + 1))
+  if grep -q "scrollSimulatorCGEvent\|SimulatorBridge.*swipe\|bridge\.swipe" "$AGENT_SWIFT_DIR/Sources/agent-swift/main.swift" 2>/dev/null; then
+    P11_PASS=$((P11_PASS + 1))
+  fi
+
+  if [ "$P11_PASS" -eq "$P11_TOTAL" ]; then
+    P11_CGEVENT_SIM="pass"
+  else
+    P11_CGEVENT_SIM="fail ($P11_PASS/$P11_TOTAL)"
+  fi
+fi
+echo "p11_cgevent_sim:  $P11_CGEVENT_SIM"
+
+# Phase 12 gates: User-driven UX (type, swipe, compound find, multi-sim)
+P12_USER_UX="skip"
+if [ "$PHASE" -ge 12 ] && [ "$CLI_STATUS" = "pass" ]; then
+  P12_PASS=0
+  P12_TOTAL=0
+
+  # Gate 1: type command exists in help
+  P12_TOTAL=$((P12_TOTAL + 1))
+  if command_exists_in_help "type"; then
+    P12_PASS=$((P12_PASS + 1))
+  fi
+
+  # Gate 2: swipe command exists in help
+  P12_TOTAL=$((P12_TOTAL + 1))
+  if command_exists_in_help "swipe"; then
+    P12_PASS=$((P12_PASS + 1))
+  fi
+
+  # Gate 3: type command in schema output
+  P12_TOTAL=$((P12_TOTAL + 1))
+  "$BINARY_PATH" schema > /tmp/as-eval-schema12.json 2>&1 || true
+  if python3 -c "import json; d=json.load(open('/tmp/as-eval-schema12.json')); assert any(c.get('name')=='type' for c in d)" 2>/dev/null; then
+    P12_PASS=$((P12_PASS + 1))
+  fi
+
+  # Gate 4: swipe command in schema output
+  P12_TOTAL=$((P12_TOTAL + 1))
+  if python3 -c "import json; d=json.load(open('/tmp/as-eval-schema12.json')); assert any(c.get('name')=='swipe' for c in d)" 2>/dev/null; then
+    P12_PASS=$((P12_PASS + 1))
+  fi
+
+  # Gate 5: TypeCommand struct exists in main.swift
+  P12_TOTAL=$((P12_TOTAL + 1))
+  if grep -q "struct TypeCommand" "$AGENT_SWIFT_DIR/Sources/agent-swift/main.swift" 2>/dev/null; then
+    P12_PASS=$((P12_PASS + 1))
+  fi
+
+  # Gate 6: SwipeCommand struct exists in main.swift
+  P12_TOTAL=$((P12_TOTAL + 1))
+  if grep -q "struct SwipeCommand" "$AGENT_SWIFT_DIR/Sources/agent-swift/main.swift" 2>/dev/null; then
+    P12_PASS=$((P12_PASS + 1))
+  fi
+
+  # Gate 7: connect --udid flag exists
+  P12_TOTAL=$((P12_TOTAL + 1))
+  "$BINARY_PATH" connect --help > /tmp/as-eval-connect-help12.txt 2>&1 || true
+  if grep -q "udid" /tmp/as-eval-connect-help12.txt 2>/dev/null; then
+    P12_PASS=$((P12_PASS + 1))
+  fi
+
+  # Gate 8: snapshot --all flag exists
+  P12_TOTAL=$((P12_TOTAL + 1))
+  "$BINARY_PATH" snapshot --help > /tmp/as-eval-snapshot-help12.txt 2>&1 || true
+  if grep -qi "\-\-all" /tmp/as-eval-snapshot-help12.txt 2>/dev/null; then
+    P12_PASS=$((P12_PASS + 1))
+  fi
+
+  # Gate 9: find handles compound locators (role+text pattern in source)
+  P12_TOTAL=$((P12_TOTAL + 1))
+  if grep -qE "compound|locatorPairs|locators.*role.*text" "$AGENT_SWIFT_DIR/Sources/agent-swift/main.swift" 2>/dev/null; then
+    P12_PASS=$((P12_PASS + 1))
+  fi
+
+  # Gate 10: version is 0.7.x or higher
+  P12_TOTAL=$((P12_TOTAL + 1))
+  VERSION_OUT=$("$BINARY_PATH" --version 2>&1 || true)
+  if echo "$VERSION_OUT" | grep -qE "0\.[7-9]\.[0-9]+|0\.[1-9][0-9]+\.[0-9]+|[1-9]+\.[0-9]+\.[0-9]+"; then
+    P12_PASS=$((P12_PASS + 1))
+  fi
+
+  # Gate 11: Tests >= 145
+  P12_TOTAL=$((P12_TOTAL + 1))
+  TEST_NUM=$(echo "$TEST_COUNT" | tr -dc '0-9')
+  if [ "$TEST_NUM" -ge 145 ]; then
+    P12_PASS=$((P12_PASS + 1))
+  fi
+
+  # Gate 12: type --json on invalid state returns valid JSON error
+  P12_TOTAL=$((P12_TOTAL + 1))
+  "$BINARY_PATH" type "test" --json > /tmp/as-eval-type.json 2>&1 || true
+  if json_check /tmp/as-eval-type.json json; then
+    P12_PASS=$((P12_PASS + 1))
+  fi
+
+  if [ "$P12_PASS" -eq "$P12_TOTAL" ]; then
+    P12_USER_UX="pass"
+  else
+    P12_USER_UX="fail ($P12_PASS/$P12_TOTAL)"
+  fi
+fi
+echo "p12_user_ux:      $P12_USER_UX"
 
 # Step 5: E2E test (optional; enabled when e2e-test.sh exists)
 E2E_STATUS="skip"
@@ -944,6 +1437,81 @@ if [ "$BUILD_STATUS" = "pass" ] && [ "$TEST_STATUS" = "pass" ] && [ "$CONTRACT_S
          [ "$P5_POLISH" = "pass" ] && \
          [ "$P2B_WIDGET" = "pass" ] && \
          [ "$P7_CLICK" = "pass" ]; then
+        PHASE_COMPLETE="yes"
+      fi
+      ;;
+    8)
+      if [ "$HELP_STATUS" = "pass" ] && \
+         [ "$JSON_STATUS" = "pass" ] && \
+         [ "$EXIT_STATUS" = "pass" ] && \
+         [ "$P3_INTERACTION" = "pass" ] && \
+         [ "$P4_AUTONOMY" = "pass" ] && \
+         [ "$P5_POLISH" = "pass" ] && \
+         [ "$P2B_WIDGET" = "pass" ] && \
+         [ "$P7_CLICK" = "pass" ] && \
+         [ "$P8_SIMULATOR" = "pass" ]; then
+        PHASE_COMPLETE="yes"
+      fi
+      ;;
+    9)
+      if [ "$HELP_STATUS" = "pass" ] && \
+         [ "$JSON_STATUS" = "pass" ] && \
+         [ "$EXIT_STATUS" = "pass" ] && \
+         [ "$P3_INTERACTION" = "pass" ] && \
+         [ "$P4_AUTONOMY" = "pass" ] && \
+         [ "$P5_POLISH" = "pass" ] && \
+         [ "$P2B_WIDGET" = "pass" ] && \
+         [ "$P7_CLICK" = "pass" ] && \
+         [ "$P8_SIMULATOR" = "pass" ] && \
+         [ "$P9_IDB" = "pass" ]; then
+        PHASE_COMPLETE="yes"
+      fi
+      ;;
+    10)
+      if [ "$HELP_STATUS" = "pass" ] && \
+         [ "$JSON_STATUS" = "pass" ] && \
+         [ "$EXIT_STATUS" = "pass" ] && \
+         [ "$P3_INTERACTION" = "pass" ] && \
+         [ "$P4_AUTONOMY" = "pass" ] && \
+         [ "$P5_POLISH" = "pass" ] && \
+         [ "$P2B_WIDGET" = "pass" ] && \
+         [ "$P7_CLICK" = "pass" ] && \
+         [ "$P8_SIMULATOR" = "pass" ] && \
+         [ "$P9_IDB" = "pass" ] && \
+         [ "$P10_MIRROR" = "pass" ]; then
+        PHASE_COMPLETE="yes"
+      fi
+      ;;
+    11)
+      if [ "$HELP_STATUS" = "pass" ] && \
+         [ "$JSON_STATUS" = "pass" ] && \
+         [ "$EXIT_STATUS" = "pass" ] && \
+         [ "$P3_INTERACTION" = "pass" ] && \
+         [ "$P4_AUTONOMY" = "pass" ] && \
+         [ "$P5_POLISH" = "pass" ] && \
+         [ "$P2B_WIDGET" = "pass" ] && \
+         [ "$P7_CLICK" = "pass" ] && \
+         [ "$P8_SIMULATOR" = "pass" ] && \
+         [ "$P9_IDB" = "pass" ] && \
+         [ "$P10_MIRROR" = "pass" ] && \
+         [ "$P11_CGEVENT_SIM" = "pass" ]; then
+        PHASE_COMPLETE="yes"
+      fi
+      ;;
+    12)
+      if [ "$HELP_STATUS" = "pass" ] && \
+         [ "$JSON_STATUS" = "pass" ] && \
+         [ "$EXIT_STATUS" = "pass" ] && \
+         [ "$P3_INTERACTION" = "pass" ] && \
+         [ "$P4_AUTONOMY" = "pass" ] && \
+         [ "$P5_POLISH" = "pass" ] && \
+         [ "$P2B_WIDGET" = "pass" ] && \
+         [ "$P7_CLICK" = "pass" ] && \
+         [ "$P8_SIMULATOR" = "pass" ] && \
+         [ "$P9_IDB" = "pass" ] && \
+         [ "$P10_MIRROR" = "pass" ] && \
+         [ "$P11_CGEVENT_SIM" = "pass" ] && \
+         [ "$P12_USER_UX" = "pass" ]; then
         PHASE_COMPLETE="yes"
       fi
       ;;

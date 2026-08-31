@@ -8,7 +8,7 @@ struct AgentSwift: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "agent-swift",
         abstract: "CLI for AI agents to control macOS apps via Accessibility API",
-        version: "0.2.1",
+        version: "0.7.0",
         subcommands: [
             DoctorCommand.self,
             ConnectCommand.self,
@@ -24,6 +24,8 @@ struct AgentSwift: ParsableCommand {
             WaitCommand.self,
             ScrollCommand.self,
             ClickCommand.self,
+            TypeCommand.self,
+            SwipeCommand.self,
             SchemaCommand.self
         ]
     )
@@ -97,23 +99,63 @@ struct DoctorCommand: ParsableCommand {
     func run() throws {
         var checks: [Check] = []
 
-        let trusted = AXClient.isTrusted(prompt: false)
-        checks.append(Check(
-            name: "accessibility",
-            status: trusted ? "pass" : "fail",
-            message: trusted ? "Accessibility access granted" : "Accessibility access NOT granted",
-            fix: trusted ? nil : "Grant access in System Settings > Privacy & Security > Accessibility"
-        ))
-
         let session = SessionStore().load()
-        if session.isConnected, let pid = session.pid {
-            let running = AXClient.isProcessRunning(pid: pid)
+
+        if session.isMirrorMode {
+            let mirrorRunning = MirrorBridge.isRunning()
             checks.append(Check(
-                name: "target_app",
-                status: running ? "pass" : "fail",
-                message: running ? "Target app (PID \(pid)) is running" : "Target app (PID \(pid)) is NOT running",
-                fix: running ? nil : "Reconnect with: agent-swift connect"
+                name: "iphone_mirroring",
+                status: mirrorRunning ? "pass" : "fail",
+                message: mirrorRunning ? "iPhone Mirroring is running" : "iPhone Mirroring is not running",
+                fix: mirrorRunning ? nil : "Open iPhone Mirroring: open -a 'iPhone Mirroring'"
             ))
+
+            let axTrusted = AXClient.isTrusted(prompt: false)
+            checks.append(Check(
+                name: "accessibility",
+                status: axTrusted ? "pass" : "fail",
+                message: axTrusted ? "Accessibility access granted" : "Accessibility access NOT granted",
+                fix: axTrusted ? nil : "Grant access in System Settings > Privacy & Security > Accessibility"
+            ))
+        } else if session.isSimulatorMode {
+            let idbAvail = IdbBridge.isIdbAvailable()
+            checks.append(Check(
+                name: "idb",
+                status: idbAvail ? "pass" : "fail",
+                message: idbAvail ? "idb CLI available" : "idb CLI not found",
+                fix: idbAvail ? nil : "Install: brew install facebook/fb/idb-companion facebook/fb/idb-cli"
+            ))
+
+            if let udid = session.simulatorUDID {
+                let bridge = SimulatorBridge(udid: udid)
+                let devices = (try? SimulatorBridge.listDevices()) ?? []
+                let booted = devices.first(where: { $0.udid == udid && $0.isBooted })
+                checks.append(Check(
+                    name: "simulator",
+                    status: booted != nil ? "pass" : "fail",
+                    message: booted != nil ? "Simulator \(session.simulatorDeviceType ?? udid) is booted" : "Simulator \(udid) is not booted",
+                    fix: booted != nil ? nil : "Boot simulator: xcrun simctl boot \(udid)"
+                ))
+                _ = bridge
+            }
+        } else {
+            let trusted = AXClient.isTrusted(prompt: false)
+            checks.append(Check(
+                name: "accessibility",
+                status: trusted ? "pass" : "fail",
+                message: trusted ? "Accessibility access granted" : "Accessibility access NOT granted",
+                fix: trusted ? nil : "Grant access in System Settings > Privacy & Security > Accessibility"
+            ))
+
+            if session.isConnected, let pid = session.pid {
+                let running = AXClient.isProcessRunning(pid: pid)
+                checks.append(Check(
+                    name: "target_app",
+                    status: running ? "pass" : "fail",
+                    message: running ? "Target app (PID \(pid)) is running" : "Target app (PID \(pid)) is NOT running",
+                    fix: running ? nil : "Reconnect with: agent-swift connect"
+                ))
+            }
         }
 
         let allPass = checks.allSatisfy { $0.status == "pass" }
@@ -136,7 +178,7 @@ struct DoctorCommand: ParsableCommand {
 // MARK: - Connect
 
 struct ConnectCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "connect", abstract: "Connect to a macOS app")
+    static let configuration = CommandConfiguration(commandName: "connect", abstract: "Connect to a macOS app or iOS Simulator")
 
     @OptionGroup var globals: GlobalOptions
 
@@ -146,14 +188,42 @@ struct ConnectCommand: ParsableCommand {
     @Option(name: .long, help: "Bundle identifier")
     var bundleId: String?
 
+    @Option(name: .long, help: "Connect to iOS Simulator (optional UDID, omit for auto-detect)")
+    var simulator: String?
+
+    @Option(name: .long, help: "Simulator UDID (alias for --simulator)")
+    var udid: String?
+
+    @Flag(name: .long, help: "Enable simulator mode (auto-detect booted device)")
+    var sim = false
+
+    @Flag(name: .long, help: "Connect via iPhone Mirroring (real device)")
+    var mirror = false
+
     struct ConnectResult: Codable {
         let connected: Bool
-        let pid: Int
+        let pid: Int?
         let bundleId: String?
         let connectedAt: String
+        let mode: String?
+        let simulatorUDID: String?
+        let simulatorDeviceType: String?
     }
 
     func run() throws {
+        let now = ISO8601DateFormatter().string(from: Date())
+        let store = SessionStore()
+
+        if mirror {
+            try connectMirror(store: store, now: now)
+            return
+        }
+
+        if sim || simulator != nil || udid != nil {
+            try connectSimulator(store: store, now: now)
+            return
+        }
+
         guard AXClient.isTrusted() else {
             Output.printError(code: "AX_NOT_TRUSTED", message: "Accessibility permission not granted",
                             hint: "Grant access in System Settings > Privacy & Security > Accessibility", useJson: globals.useJson)
@@ -170,7 +240,6 @@ struct ConnectCommand: ParsableCommand {
                 throw ExitCode(2)
             }
             resolvedPid = p
-            // Resolve bundleId from PID if not provided
             resolvedBundleId = bundleId ?? NSRunningApplication(processIdentifier: pid_t(p))?.bundleIdentifier
         } else if let bid = bundleId {
             guard let p = AXClient.resolvePID(bundleId: bid) else {
@@ -181,26 +250,114 @@ struct ConnectCommand: ParsableCommand {
             resolvedPid = p
             resolvedBundleId = bid
         } else {
-            Output.printError(code: "INVALID_ARGS", message: "Must specify --pid or --bundle-id",
-                            hint: "Example: agent-swift connect --bundle-id com.apple.TextEdit", useJson: globals.useJson)
+            Output.printError(code: "INVALID_ARGS", message: "Must specify --pid, --bundle-id, or --sim",
+                            hint: "Example: agent-swift connect --bundle-id com.apple.TextEdit\n  or:     agent-swift connect --sim", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
-        let now = ISO8601DateFormatter().string(from: Date())
         var session = SessionData.empty
         session.pid = resolvedPid
         session.bundleId = resolvedBundleId
         session.connectedAt = now
 
-        let store = SessionStore()
         try store.save(session)
 
-        let result = ConnectResult(connected: true, pid: resolvedPid, bundleId: resolvedBundleId, connectedAt: now)
+        let result = ConnectResult(connected: true, pid: resolvedPid, bundleId: resolvedBundleId,
+                                   connectedAt: now, mode: "desktop", simulatorUDID: nil, simulatorDeviceType: nil)
 
         if globals.useJson {
             print(Output.json(result))
         } else {
             print("Connected to PID \(resolvedPid)" + (resolvedBundleId.map { " (\($0))" } ?? ""))
+        }
+    }
+
+    private func connectSimulator(store: SessionStore, now: String) throws {
+        let bridge: SimulatorBridge
+        let resolvedUdid = udid ?? simulator
+        do {
+            if let udid = resolvedUdid, !udid.isEmpty {
+                bridge = try SimulatorBridge.device(udid: udid)
+            } else {
+                bridge = try SimulatorBridge.bootedDevice()
+            }
+        } catch let error as SimulatorError {
+            Output.printError(code: error.code, message: error.description,
+                            hint: error.hint, useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        guard SimulatorBridge.isSimulatorRunning() else {
+            Output.printError(code: "SIM_APP_NOT_RUNNING", message: "Simulator.app is not running",
+                            hint: "Open Simulator: open -a Simulator", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        let idb = IdbBridge(udid: bridge.udid)
+        try? idb.enableAccessibility()
+
+        let info = try? bridge.deviceInfo()
+        let simPid = AXClient.resolvePID(bundleId: "com.apple.iphonesimulator")
+
+        var session = SessionData.empty
+        session.pid = simPid
+        session.bundleId = "com.apple.iphonesimulator"
+        session.connectedAt = now
+        session.simulatorUDID = bridge.udid
+        session.simulatorDeviceType = info?.name
+
+        try store.save(session)
+
+        if let app = simPid.flatMap({ NSRunningApplication(processIdentifier: pid_t($0)) }) {
+            app.activate()
+        }
+
+        let result = ConnectResult(connected: true, pid: simPid, bundleId: "com.apple.iphonesimulator",
+                                   connectedAt: now, mode: "simulator",
+                                   simulatorUDID: bridge.udid, simulatorDeviceType: info?.name)
+
+        if globals.useJson {
+            print(Output.json(result))
+        } else {
+            print("Connected to Simulator: \(info?.name ?? bridge.udid)")
+        }
+    }
+
+    private func connectMirror(store: SessionStore, now: String) throws {
+        guard MirrorBridge.isRunning() else {
+            Output.printError(code: "MIRROR_NOT_RUNNING", message: "iPhone Mirroring is not running",
+                            hint: "Open iPhone Mirroring: open -a 'iPhone Mirroring'", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        guard AXClient.isTrusted() else {
+            Output.printError(code: "AX_NOT_TRUSTED", message: "Accessibility permission not granted",
+                            hint: "Grant access in System Settings > Privacy & Security > Accessibility", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        let mirrorPid = AXClient.resolvePID(bundleId: MirrorBridge.bundleId)
+
+        var session = SessionData.empty
+        session.pid = mirrorPid
+        session.bundleId = MirrorBridge.bundleId
+        session.connectedAt = now
+        session.mirrorMode = true
+
+        try store.save(session)
+
+        if let app = mirrorPid.flatMap({ NSRunningApplication(processIdentifier: pid_t($0)) }) {
+            app.activate()
+        }
+
+        let result = ConnectResult(connected: true, pid: mirrorPid, bundleId: MirrorBridge.bundleId,
+                                   connectedAt: now, mode: "mirror",
+                                   simulatorUDID: nil, simulatorDeviceType: nil)
+
+        if globals.useJson {
+            print(Output.json(result))
+        } else {
+            print("Connected via iPhone Mirroring")
         }
     }
 }
@@ -236,23 +393,37 @@ struct StatusCommand: ParsableCommand {
         let bundleId: String?
         let connectedAt: String?
         let refs: Int
+        let mode: String?
+        let simulatorUDID: String?
+        let simulatorDeviceType: String?
     }
 
     func run() throws {
         let session = SessionStore().load()
+        let mode: String? = session.isConnected ? (session.isMirrorMode ? "mirror" : session.isSimulatorMode ? "simulator" : "desktop") : nil
         let result = StatusResult(
             connected: session.isConnected,
             pid: session.pid,
             bundleId: session.bundleId,
             connectedAt: session.connectedAt,
-            refs: session.refs.count
+            refs: session.refs.count,
+            mode: mode,
+            simulatorUDID: session.simulatorUDID,
+            simulatorDeviceType: session.simulatorDeviceType
         )
 
         if globals.useJson {
             print(Output.json(result))
         } else {
             if session.isConnected {
-                print("Connected to PID \(session.pid!)" + (session.bundleId.map { " (\($0))" } ?? ""))
+                if session.isMirrorMode {
+                    print("Connected via iPhone Mirroring")
+                } else if session.isSimulatorMode {
+                    print("Connected to Simulator: \(session.simulatorDeviceType ?? session.simulatorUDID ?? "unknown")")
+                    print("UDID: \(session.simulatorUDID ?? "unknown")")
+                } else {
+                    print("Connected to PID \(session.pid!)" + (session.bundleId.map { " (\($0))" } ?? ""))
+                }
                 print("Since: \(session.connectedAt ?? "unknown")")
                 print("Refs: \(session.refs.count)")
             } else {
@@ -272,11 +443,25 @@ struct SnapshotCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Interactive elements only")
     var interactive = false
 
+    @Flag(name: .long, help: "Include off-screen and clipped elements")
+    var all = false
+
     func run() throws {
         let store = SessionStore()
         var session = store.load()
 
-        guard session.isConnected, let pid = session.pid else {
+        guard session.isConnected else {
+            Output.printError(code: "NOT_CONNECTED", message: "No active session",
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        if session.isSimulatorMode, let udid = session.simulatorUDID {
+            try snapshotSimulator(store: store, session: &session, udid: udid)
+            return
+        }
+
+        guard let pid = session.pid else {
             Output.printError(code: "NOT_CONNECTED", message: "No active session",
                             hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
             throw ExitCode(2)
@@ -315,6 +500,43 @@ struct SnapshotCommand: ParsableCommand {
             print(SnapshotFormatter.formatHuman(elements: elements))
         }
     }
+
+    private func snapshotSimulator(store: SessionStore, session: inout SessionData, udid: String) throws {
+        let idb = IdbBridge(udid: udid)
+        let idbElements: [IdbElement]
+        do {
+            idbElements = try idb.describeAll(includeAll: all)
+        } catch let error as IdbError {
+            Output.printError(code: error.code, message: error.description,
+                            hint: error.hint, useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        var filtered = idbElements
+        if interactive && !all {
+            filtered = filtered.filter { $0.isInteractive }
+        }
+
+        var elements: [(ref: String, node: AXNode)] = []
+        var refs: [String: SessionData.RefEntry] = [:]
+        for (i, idbEl) in filtered.enumerated() {
+            let ref = "e\(i + 1)"
+            let node = idbEl.toAXNode()
+            elements.append((ref: ref, node: node))
+            refs[ref] = node.toRefEntry()
+        }
+
+        session.refs = refs
+        session.lastSnapshotAt = ISO8601DateFormatter().string(from: Date())
+        session.interactiveSnapshot = interactive
+        try store.save(session)
+
+        if globals.useJson {
+            print(SnapshotFormatter.formatJson(elements: elements))
+        } else {
+            print(SnapshotFormatter.formatHuman(elements: elements))
+        }
+    }
 }
 
 // MARK: - Press
@@ -336,16 +558,57 @@ struct PressCommand: ParsableCommand {
         let store = SessionStore()
         let session = store.load()
 
-        guard session.isConnected, let pid = session.pid else {
+        guard session.isConnected else {
             Output.printError(code: "NOT_CONNECTED", message: "No active session",
                             hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
         let refKey = ref.hasPrefix("@") ? String(ref.dropFirst()) : ref
-        guard session.refs[refKey] != nil else {
+        guard let refEntry = session.refs[refKey] else {
             Output.printError(code: "ELEMENT_NOT_FOUND", message: "Element not found: \(ref)",
                             hint: "Re-run: agent-swift snapshot -i", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        if session.isSimulatorMode, let udid = session.simulatorUDID {
+            guard let bounds = refEntry.bounds else {
+                Output.printError(code: "NO_BOUNDS", message: "Element \(ref) has no position",
+                                hint: "Re-run: agent-swift snapshot -i", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            let center = CGPoint(x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2)
+            let idb = IdbBridge(udid: udid)
+            do {
+                try idb.tap(x: center.x, y: center.y)
+                if globals.useJson {
+                    print(Output.json(PressResult(pressed: ref, success: true)))
+                } else {
+                    print("Pressed \(ref)")
+                }
+                return
+            } catch {
+                // idb failed — fall through to CGEvent through Simulator window
+            }
+            let bridge = SimulatorBridge(udid: udid)
+            do {
+                try bridge.tap(x: center.x, y: center.y)
+                if globals.useJson {
+                    print(Output.json(PressResult(pressed: ref, success: true)))
+                } else {
+                    print("Pressed \(ref)")
+                }
+            } catch let error as SimulatorError {
+                Output.printError(code: error.code, message: error.description,
+                                hint: error.hint, useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            return
+        }
+
+        guard let pid = session.pid else {
+            Output.printError(code: "NOT_CONNECTED", message: "No active session",
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
@@ -374,7 +637,6 @@ struct PressCommand: ParsableCommand {
             acted = AXClient.performPress(element: target, actionName: "AXConfirm")
         }
 
-        // Fallback: CGEvent click when AXPress/AXConfirm fail (SwiftUI NavigationLink)
         if !acted {
             let tree = AXClient.walkTree(element: root)
             let allNodes = AXClient.flattenTree(tree)
@@ -474,7 +736,41 @@ struct FillCommand: ParsableCommand {
         let store = SessionStore()
         let session = store.load()
 
-        guard session.isConnected, let pid = session.pid else {
+        guard session.isConnected else {
+            Output.printError(code: "NOT_CONNECTED", message: "No active session",
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        if session.isSimulatorMode, let udid = session.simulatorUDID {
+            let refKey = ref.hasPrefix("@") ? String(ref.dropFirst()) : ref
+            guard let refEntry = session.refs[refKey] else {
+                Output.printError(code: "ELEMENT_NOT_FOUND", message: "Element not found: \(ref)",
+                                hint: "Re-run: agent-swift snapshot -i", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            let idb = IdbBridge(udid: udid)
+            do {
+                if let bounds = refEntry.bounds {
+                    let center = CGPoint(x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2)
+                    try idb.tap(x: center.x, y: center.y)
+                    Thread.sleep(forTimeInterval: 0.3)
+                }
+                try idb.text(input: text)
+                if globals.useJson {
+                    print(Output.json(FillResult(filled: ref, text: text, success: true)))
+                } else {
+                    print("Filled \(ref) with \"\(text)\"")
+                }
+            } catch let error as IdbError {
+                Output.printError(code: error.code, message: error.description,
+                                hint: error.hint, useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            return
+        }
+
+        guard let pid = session.pid else {
             Output.printError(code: "NOT_CONNECTED", message: "No active session",
                             hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
             throw ExitCode(2)
@@ -606,33 +902,40 @@ struct GetCommand: ParsableCommand {
 // MARK: - Find
 
 struct FindCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "find", abstract: "Find element by locator")
+    static let configuration = CommandConfiguration(commandName: "find",
+        abstract: "Find element by locator",
+        discussion: """
+        Locators: role, text, identifier, label, value
+        Actions: press, click, fill <text>, get [property]
+
+        Single locator:
+          agent-swift find text Save press
+          agent-swift find role button
+
+        Compound locators (AND logic):
+          agent-swift find role button text Open press
+          agent-swift find identifier myField text Hello fill "world"
+        """)
 
     @OptionGroup var globals: GlobalOptions
 
-    @Argument(help: "Locator type: role, text, or identifier")
-    var locator: String
-
-    @Argument(help: "Value to match")
-    var value: String
-
-    @Argument(help: "Optional chained action: press, click, fill, or get")
-    var action: String?
-
-    @Argument(help: "Action argument (text for fill, property for get)")
-    var actionArg: String?
+    @Argument(parsing: .remaining,
+              help: "Locator/value pairs followed by optional action: <locator> <value> [<locator> <value>...] [action] [actionArg]")
+    var remaining: [String] = []
 
     struct FindResult: Codable {
         let ref: String
         let type: String
         let label: String?
         let identifier: String?
+        let matchCount: Int?
     }
 
     struct FindActionResult: Codable {
         let found: String
         let action: String
         let success: Bool
+        let matchCount: Int?
     }
 
     struct FindFillResult: Codable {
@@ -649,6 +952,74 @@ struct FindCommand: ParsableCommand {
         let value: String
     }
 
+    // Known locator names and action names for compound parsing
+    static let locatorNames: Set<String> = ["role", "text", "identifier", "label", "value"]
+    static let actionNames: Set<String> = ["press", "click", "fill", "get"]
+
+    /// Parse remaining args into locator pairs + optional action + actionArg
+    func parseCompoundArgs() -> (locatorPairs: [(String, String)], action: String?, actionArg: String?) {
+        var locatorPairs: [(String, String)] = []
+        var action: String? = nil
+        var actionArg: String? = nil
+        var i = 0
+        let args = remaining
+
+        while i < args.count {
+            let current = args[i]
+            if Self.locatorNames.contains(current) {
+                // It's a locator — next arg is its value
+                if i + 1 < args.count {
+                    locatorPairs.append((current, args[i + 1]))
+                    i += 2
+                } else {
+                    // Locator with no value — treat as error
+                    break
+                }
+            } else if Self.actionNames.contains(current) {
+                action = current
+                if i + 1 < args.count {
+                    actionArg = args[i + 1]
+                }
+                break
+            } else if locatorPairs.isEmpty {
+                // Backwards compat: first two args are locator value without compound
+                if i + 1 < args.count {
+                    locatorPairs.append((current, args[i + 1]))
+                    i += 2
+                } else {
+                    break
+                }
+            } else {
+                // Unknown token — could be an action
+                action = current
+                if i + 1 < args.count {
+                    actionArg = args[i + 1]
+                }
+                break
+            }
+        }
+
+        return (locatorPairs, action, actionArg)
+    }
+
+    /// Check if a node matches a single locator pair
+    func nodeMatches(_ node: AXNode, locator: String, value: String) -> Bool {
+        switch locator {
+        case "role":
+            return node.role == value || node.displayType == value
+        case "text", "label":
+            if let label = node.displayLabel, label.contains(value) { return true }
+            return false
+        case "identifier":
+            return node.identifier == value
+        case "value":
+            if let v = node.displayLabel, v.contains(value) { return true }
+            return false
+        default:
+            return false
+        }
+    }
+
     func run() throws {
         let store = SessionStore()
         let session = store.load()
@@ -659,6 +1030,44 @@ struct FindCommand: ParsableCommand {
             throw ExitCode(2)
         }
 
+        let parsed = parseCompoundArgs()
+        let locatorPairs = parsed.locatorPairs
+        let action = parsed.action
+        let actionArg = parsed.actionArg
+
+        guard !locatorPairs.isEmpty else {
+            Output.printError(code: "INVALID_ARGS", message: "No locator specified",
+                            hint: "Usage: agent-swift find <locator> <value> [action]\n  Locators: role, text, identifier, label, value\n  Actions: press, click, fill <text>, get [property]\n  Compound: find role button text Open press", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        // Validate locator names
+        for (loc, _) in locatorPairs {
+            if !Self.locatorNames.contains(loc) {
+                var hint = "Use: role, text, identifier, label, or value"
+                // Suggest corrections for common typos
+                if loc == "label" || loc == "title" || loc == "name" {
+                    hint = "Did you mean 'text'? Use: role, text, identifier, label, or value"
+                } else if loc == "type" {
+                    hint = "Did you mean 'role'? Use: role, text, identifier, label, or value"
+                }
+                Output.printError(code: "INVALID_ARGS", message: "Unknown locator: \(loc)",
+                                hint: hint, useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+        }
+
+        // Validate action name if provided
+        if let action = action, !Self.actionNames.contains(action) {
+            var hint = "Use: press, click, fill, or get"
+            if action == "tap" {
+                hint = "Did you mean 'press'? Use: press, click, fill, or get"
+            }
+            Output.printError(code: "INVALID_ARGS", message: "Unknown action: \(action)",
+                            hint: hint, useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
         // Walk tree to get nodes
         let root = AXClient.appElement(pid: pid)
         let tree = AXClient.walkTree(element: root)
@@ -666,48 +1075,39 @@ struct FindCommand: ParsableCommand {
         let useInteractive = session.interactiveSnapshot ?? false
         let nodes = useInteractive ? allNodes.filter { $0.isInteractive } : allNodes
 
-        // Find matching element
-        var matchIndex: Int? = nil
+        // Find ALL matching elements (compound AND logic)
+        var matchIndices: [Int] = []
         for (i, node) in nodes.enumerated() {
-            switch locator {
-            case "role":
-                if node.role == value || node.displayType == value {
-                    matchIndex = i
-                }
-            case "text":
-                if let label = node.displayLabel, label.contains(value) {
-                    matchIndex = i
-                }
-            case "identifier":
-                if node.identifier == value {
-                    matchIndex = i
-                }
-            default:
-                Output.printError(code: "INVALID_ARGS", message: "Unknown locator: \(locator)",
-                                hint: "Use: role, text, or identifier", useJson: globals.useJson)
-                throw ExitCode(2)
+            let matchesAll = locatorPairs.allSatisfy { (loc, val) in
+                nodeMatches(node, locator: loc, value: val)
             }
-            if matchIndex != nil { break }
+            if matchesAll {
+                matchIndices.append(i)
+            }
         }
 
-        guard let idx = matchIndex else {
-            Output.printError(code: "ELEMENT_NOT_FOUND", message: "No element matches \(locator)=\"\(value)\"",
+        guard let idx = matchIndices.first else {
+            let desc = locatorPairs.map { "\($0.0)=\"\($0.1)\"" }.joined(separator: " AND ")
+            Output.printError(code: "ELEMENT_NOT_FOUND", message: "No element matches \(desc)",
                             hint: "Re-run: agent-swift snapshot -i", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
         let matchedNode = nodes[idx]
         let matchedRef = "@e\(idx + 1)"
+        let matchCount = matchIndices.count
 
         // If no chained action, just print the match
         guard let action = action else {
             if globals.useJson {
                 print(Output.json(FindResult(ref: matchedRef, type: matchedNode.displayType,
-                                            label: matchedNode.displayLabel, identifier: matchedNode.identifier)))
+                                            label: matchedNode.displayLabel, identifier: matchedNode.identifier,
+                                            matchCount: matchCount)))
             } else {
                 var line = "\(matchedRef) [\(matchedNode.displayType)]"
                 if let label = matchedNode.displayLabel { line += " \"\(label)\"" }
                 if let id = matchedNode.identifier { line += "  identifier=\(id)" }
+                if matchCount > 1 { line += "  (\(matchCount) matches)" }
                 print(line)
             }
             return
@@ -740,7 +1140,7 @@ struct FindCommand: ParsableCommand {
             }
             if acted {
                 if globals.useJson {
-                    print(Output.json(FindActionResult(found: matchedRef, action: "press", success: true)))
+                    print(Output.json(FindActionResult(found: matchedRef, action: "press", success: true, matchCount: matchCount)))
                 } else {
                     print("Found \(matchedRef) → pressed")
                 }
@@ -762,7 +1162,7 @@ struct FindCommand: ParsableCommand {
             }
             if AXClient.performClick(at: center) {
                 if globals.useJson {
-                    print(Output.json(FindActionResult(found: matchedRef, action: "click", success: true)))
+                    print(Output.json(FindActionResult(found: matchedRef, action: "click", success: true, matchCount: matchCount)))
                 } else {
                     print("Found \(matchedRef) → clicked at (\(Int(center.x)), \(Int(center.y)))")
                 }
@@ -825,13 +1225,56 @@ struct ScreenshotCommand: ParsableCommand {
     struct ScreenshotResult: Codable {
         let path: String
         let success: Bool
+        let mode: String?
     }
 
     func run() throws {
         let store = SessionStore()
         let session = store.load()
 
-        guard session.isConnected, let pid = session.pid else {
+        guard session.isConnected else {
+            Output.printError(code: "NOT_CONNECTED", message: "No active session",
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        let outputPath = path ?? "/tmp/agent-swift-screenshot.png"
+
+        if session.isMirrorMode {
+            let mirror = MirrorBridge()
+            do {
+                try mirror.screenshot(to: outputPath)
+                if globals.useJson {
+                    print(Output.json(ScreenshotResult(path: outputPath, success: true, mode: "mirror")))
+                } else {
+                    print("Screenshot saved to \(outputPath)")
+                }
+            } catch let error as MirrorError {
+                Output.printError(code: error.code, message: error.description,
+                                hint: error.hint, useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            return
+        }
+
+        if session.isSimulatorMode, let udid = session.simulatorUDID {
+            let bridge = SimulatorBridge(udid: udid)
+            do {
+                try bridge.screenshot(to: outputPath)
+                if globals.useJson {
+                    print(Output.json(ScreenshotResult(path: outputPath, success: true, mode: "simulator")))
+                } else {
+                    print("Screenshot saved to \(outputPath)")
+                }
+            } catch let error as SimulatorError {
+                Output.printError(code: error.code, message: error.description,
+                                hint: error.hint, useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            return
+        }
+
+        guard let pid = session.pid else {
             Output.printError(code: "NOT_CONNECTED", message: "No active session",
                             hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
             throw ExitCode(2)
@@ -843,12 +1286,11 @@ struct ScreenshotCommand: ParsableCommand {
             throw ExitCode(2)
         }
 
-        let outputPath = path ?? "/tmp/agent-swift-screenshot.png"
         let success = AXClient.captureScreenshot(pid: pid, path: outputPath)
 
         if success {
             if globals.useJson {
-                print(Output.json(ScreenshotResult(path: outputPath, success: true)))
+                print(Output.json(ScreenshotResult(path: outputPath, success: true, mode: "desktop")))
             } else {
                 print("Screenshot saved to \(outputPath)")
             }
@@ -1095,7 +1537,23 @@ struct ScrollCommand: ParsableCommand {
         let store = SessionStore()
         let session = store.load()
 
-        guard session.isConnected, let pid = session.pid else {
+        guard session.isConnected else {
+            Output.printError(code: "NOT_CONNECTED", message: "No active session",
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        if session.isMirrorMode {
+            try scrollMirror()
+            return
+        }
+
+        if session.isSimulatorMode, let udid = session.simulatorUDID {
+            try scrollSimulator(udid: udid)
+            return
+        }
+
+        guard let pid = session.pid else {
             Output.printError(code: "NOT_CONNECTED", message: "No active session",
                             hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
             throw ExitCode(2)
@@ -1111,7 +1569,6 @@ struct ScrollCommand: ParsableCommand {
         case "up", "down":
             let scrollAmount = target == "up" ? Int32(amount) : -Int32(amount)
             if let event = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: scrollAmount, wheel2: 0, wheel3: 0) {
-                // Bring app to front
                 if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
                     app.activate()
                     Thread.sleep(forTimeInterval: 0.1)
@@ -1128,7 +1585,6 @@ struct ScrollCommand: ParsableCommand {
                 throw ExitCode(2)
             }
         default:
-            // Treat as ref — scroll element into view
             let resolved = try resolveRef(target, session: session, pid: pid, useJson: globals.useJson)
             let acted = AXClient.performPress(element: resolved.element, actionName: "AXScrollToVisible")
             if acted {
@@ -1138,11 +1594,60 @@ struct ScrollCommand: ParsableCommand {
                     print("Scrolled \(target) into view")
                 }
             } else {
-                // Fallback: try to scroll the parent scroll area
                 Output.printError(code: "SCROLL_FAILED", message: "Cannot scroll \(target) into view",
                                 hint: "Try: agent-swift scroll up/down", useJson: globals.useJson)
                 throw ExitCode(2)
             }
+        }
+    }
+
+    private func scrollSimulator(udid: String) throws {
+        let bridge = SimulatorBridge(udid: udid)
+        switch target {
+        case "up", "down", "left", "right":
+            let coords = SimulatorBridge.directionToSwipeCoords(direction: target)
+            do {
+                try bridge.swipe(fromX: coords.fromX, fromY: coords.fromY,
+                                toX: coords.toX, toY: coords.toY)
+                if globals.useJson {
+                    print(Output.json(ScrollResult(target: target, success: true)))
+                } else {
+                    print("Scrolled \(target)")
+                }
+            } catch let error as SimulatorError {
+                Output.printError(code: error.code, message: error.description,
+                                hint: error.hint, useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+        default:
+            Output.printError(code: "INVALID_INPUT", message: "Simulator scroll supports: up, down, left, right",
+                            hint: "Example: agent-swift scroll down", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+    }
+
+    private func scrollMirror() throws {
+        let mirror = MirrorBridge()
+        switch target {
+        case "up", "down", "left", "right":
+            let coords = MirrorBridge.directionToSwipeCoords(direction: target)
+            do {
+                try mirror.swipe(fromX: coords.fromX, fromY: coords.fromY,
+                                toX: coords.toX, toY: coords.toY)
+                if globals.useJson {
+                    print(Output.json(ScrollResult(target: target, success: true)))
+                } else {
+                    print("Scrolled \(target)")
+                }
+            } catch let error as MirrorError {
+                Output.printError(code: error.code, message: error.description,
+                                hint: error.hint, useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+        default:
+            Output.printError(code: "INVALID_INPUT", message: "Mirror scroll supports: up, down, left, right",
+                            hint: "Example: agent-swift scroll down", useJson: globals.useJson)
+            throw ExitCode(2)
         }
     }
 }
@@ -1165,13 +1670,32 @@ struct ClickCommand: ParsableCommand {
         let x: Double
         let y: Double
         let success: Bool
+        let mode: String?
+        let iosPoint: [String: Double]?
+        let screenPoint: [String: Double]?
     }
 
     func run() throws {
         let store = SessionStore()
         let session = store.load()
 
-        guard session.isConnected, let pid = session.pid else {
+        guard session.isConnected else {
+            Output.printError(code: "NOT_CONNECTED", message: "No active session",
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        if session.isMirrorMode {
+            try clickMirror()
+            return
+        }
+
+        if session.isSimulatorMode {
+            try clickSimulator(session: session)
+            return
+        }
+
+        guard let pid = session.pid else {
             Output.printError(code: "NOT_CONNECTED", message: "No active session",
                             hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
             throw ExitCode(2)
@@ -1187,7 +1711,6 @@ struct ClickCommand: ParsableCommand {
         let clickLabel: String
 
         if target.hasPrefix("@") || target.hasPrefix("e") {
-            // Ref-based click
             let resolved = try resolveRef(target, session: session, pid: pid, useJson: globals.useJson)
             guard let pos = resolved.node.position, let sz = resolved.node.size else {
                 Output.printError(code: "NO_BOUNDS", message: "Element \(target) has no position/size",
@@ -1197,7 +1720,6 @@ struct ClickCommand: ParsableCommand {
             clickPoint = CGPoint(x: pos.x + sz.width / 2, y: pos.y + sz.height / 2)
             clickLabel = target.hasPrefix("@") ? target : "@\(target)"
         } else {
-            // Coordinate-based click
             guard let x = Double(target), let yCoord = y else {
                 Output.printError(code: "INVALID_INPUT", message: "Invalid click target: \(target)",
                                 hint: "Use @eN for element ref or 'x y' for coordinates", useJson: globals.useJson)
@@ -1207,7 +1729,6 @@ struct ClickCommand: ParsableCommand {
             clickLabel = "\(Int(x)),\(Int(yCoord))"
         }
 
-        // Bring app to front
         if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
             app.activate()
             Thread.sleep(forTimeInterval: 0.1)
@@ -1215,7 +1736,8 @@ struct ClickCommand: ParsableCommand {
 
         if AXClient.performClick(at: clickPoint) {
             if globals.useJson {
-                print(Output.json(ClickResult(clicked: clickLabel, x: clickPoint.x, y: clickPoint.y, success: true)))
+                print(Output.json(ClickResult(clicked: clickLabel, x: clickPoint.x, y: clickPoint.y,
+                                              success: true, mode: "desktop", iosPoint: nil, screenPoint: nil)))
             } else {
                 print("Clicked \(clickLabel) at (\(Int(clickPoint.x)), \(Int(clickPoint.y)))")
             }
@@ -1224,6 +1746,364 @@ struct ClickCommand: ParsableCommand {
                             hint: "Ensure Accessibility permission is granted", useJson: globals.useJson)
             throw ExitCode(2)
         }
+    }
+
+    private func clickSimulator(session: SessionData) throws {
+        guard let udid = session.simulatorUDID else {
+            Output.printError(code: "NOT_CONNECTED", message: "No simulator UDID in session",
+                            hint: "Reconnect: agent-swift connect --sim", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        let tapX: Double
+        let tapY: Double
+        let clickLabel: String
+
+        if target.hasPrefix("@") || target.hasPrefix("e") {
+            let refKey = target.hasPrefix("@") ? String(target.dropFirst()) : target
+            guard let refEntry = session.refs[refKey] else {
+                Output.printError(code: "ELEMENT_NOT_FOUND", message: "Element not found: \(target)",
+                                hint: "Re-run: agent-swift snapshot -i", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            guard let bounds = refEntry.bounds else {
+                Output.printError(code: "NO_BOUNDS", message: "Element \(target) has no position",
+                                hint: "Re-run: agent-swift snapshot -i", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            tapX = bounds.x + bounds.width / 2
+            tapY = bounds.y + bounds.height / 2
+            clickLabel = target.hasPrefix("@") ? target : "@\(target)"
+
+            let idb = IdbBridge(udid: udid)
+            do {
+                try idb.tap(x: tapX, y: tapY)
+                if globals.useJson {
+                    print(Output.json(ClickResult(
+                        clicked: clickLabel, x: tapX, y: tapY, success: true,
+                        mode: "simulator",
+                        iosPoint: ["x": tapX, "y": tapY],
+                        screenPoint: nil
+                    )))
+                } else {
+                    print("Tapped iOS (\(Int(tapX)), \(Int(tapY)))")
+                }
+                return
+            } catch {
+                // idb failed — fall through to CGEvent
+            }
+        } else {
+            guard let x = Double(target), let yCoord = y else {
+                Output.printError(code: "INVALID_INPUT", message: "Invalid click target: \(target)",
+                                hint: "Use @eN for element ref or 'x y' for coordinates", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            tapX = x
+            tapY = yCoord
+            clickLabel = "\(Int(x)),\(Int(yCoord))"
+        }
+
+        let bridge = SimulatorBridge(udid: udid)
+        do {
+            let info = try bridge.windowInfo()
+            let screenPoint = SimulatorBridge.iosPointToScreen(CGPoint(x: tapX, y: tapY), windowInfo: info)
+            try bridge.tap(x: tapX, y: tapY)
+            if globals.useJson {
+                print(Output.json(ClickResult(
+                    clicked: clickLabel, x: tapX, y: tapY, success: true,
+                    mode: "simulator",
+                    iosPoint: ["x": tapX, "y": tapY],
+                    screenPoint: ["x": screenPoint.x, "y": screenPoint.y]
+                )))
+            } else {
+                print("Tapped iOS (\(Int(tapX)), \(Int(tapY))) → screen (\(Int(screenPoint.x)), \(Int(screenPoint.y)))")
+            }
+        } catch let error as SimulatorError {
+            Output.printError(code: error.code, message: error.description,
+                            hint: error.hint, useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+    }
+
+    private func clickMirror() throws {
+        guard let tapX = Double(target), let tapY = y else {
+            Output.printError(code: "INVALID_INPUT", message: "Mirror mode requires x y coordinates",
+                            hint: "Example: agent-swift click 200 400", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        let mirror = MirrorBridge()
+        do {
+            let info = try mirror.windowInfo()
+            let screenPoint = MirrorBridge.iosPointToScreen(CGPoint(x: tapX, y: tapY), windowInfo: info)
+            try mirror.tap(x: tapX, y: tapY)
+            let clickLabel = "\(Int(tapX)),\(Int(tapY))"
+            if globals.useJson {
+                print(Output.json(ClickResult(
+                    clicked: clickLabel, x: tapX, y: tapY, success: true,
+                    mode: "mirror",
+                    iosPoint: ["x": tapX, "y": tapY],
+                    screenPoint: ["x": screenPoint.x, "y": screenPoint.y]
+                )))
+            } else {
+                print("Tapped iOS (\(Int(tapX)), \(Int(tapY))) → screen (\(Int(screenPoint.x)), \(Int(screenPoint.y)))")
+            }
+        } catch let error as MirrorError {
+            Output.printError(code: error.code, message: error.description,
+                            hint: error.hint, useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+    }
+}
+
+// MARK: - Type
+
+struct TypeCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "type", abstract: "Type text into focused field")
+
+    @OptionGroup var globals: GlobalOptions
+
+    @Argument(help: "Text to type")
+    var text: String
+
+    struct TypeResult: Codable {
+        let typed: String
+        let success: Bool
+    }
+
+    func run() throws {
+        let store = SessionStore()
+        let session = store.load()
+
+        guard session.isConnected else {
+            Output.printError(code: "NOT_CONNECTED", message: "No active session",
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        if session.isSimulatorMode, let udid = session.simulatorUDID {
+            try typeSimulator(udid: udid)
+            return
+        }
+
+        if session.isMirrorMode {
+            try typeMirror()
+            return
+        }
+
+        guard let pid = session.pid else {
+            Output.printError(code: "NOT_CONNECTED", message: "No active session",
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        // macOS AX mode: find focused element and fill it
+        guard AXClient.isProcessRunning(pid: pid) else {
+            Output.printError(code: "APP_NOT_RUNNING", message: "Target app (PID \(pid)) is no longer running",
+                            hint: "Reconnect with: agent-swift connect", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        let root = AXClient.appElement(pid: pid)
+        // Try to find the focused element and fill it
+        let focusedElement = AXClient.focusedElement(of: root)
+        if let focused = focusedElement {
+            if AXClient.performFill(element: focused, text: text) {
+                if globals.useJson {
+                    print(Output.json(TypeResult(typed: text, success: true)))
+                } else {
+                    print("Typed \"\(text)\"")
+                }
+                return
+            }
+        }
+
+        // Fallback: use CGEvent key-by-key typing
+        if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
+            app.activate()
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        typeViaCGEvent(text: text)
+        if globals.useJson {
+            print(Output.json(TypeResult(typed: text, success: true)))
+        } else {
+            print("Typed \"\(text)\" (via keystroke)")
+        }
+    }
+
+    private func typeSimulator(udid: String) throws {
+        let idb = IdbBridge(udid: udid)
+        do {
+            try idb.text(input: text)
+            if globals.useJson {
+                print(Output.json(TypeResult(typed: text, success: true)))
+            } else {
+                print("Typed \"\(text)\"")
+            }
+        } catch let error as IdbError {
+            Output.printError(code: error.code, message: error.description,
+                            hint: error.hint, useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+    }
+
+    private func typeMirror() throws {
+        typeViaCGEvent(text: text)
+        if globals.useJson {
+            print(Output.json(TypeResult(typed: text, success: true)))
+        } else {
+            print("Typed \"\(text)\" (via keystroke)")
+        }
+    }
+
+    private func typeViaCGEvent(text: String) {
+        #if canImport(AppKit)
+        for char in text {
+            let str = String(char)
+            let src = CGEventSource(stateID: .hidSystemState)
+            if let keyDown = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true),
+               let keyUp = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false) {
+                let nsStr = str as NSString
+                var unichar = nsStr.character(at: 0)
+                keyDown.keyboardSetUnicodeString(stringLength: 1, unicodeString: &unichar)
+                keyUp.keyboardSetUnicodeString(stringLength: 1, unicodeString: &unichar)
+                keyDown.post(tap: .cgSessionEventTap)
+                Thread.sleep(forTimeInterval: 0.02)
+                keyUp.post(tap: .cgSessionEventTap)
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+        }
+        #endif
+    }
+}
+
+// MARK: - Swipe
+
+struct SwipeCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "swipe", abstract: "Swipe gesture by coordinates")
+
+    @OptionGroup var globals: GlobalOptions
+
+    @Argument(help: "Start X coordinate")
+    var fromX: Double
+
+    @Argument(help: "Start Y coordinate")
+    var fromY: Double
+
+    @Argument(help: "End X coordinate")
+    var toX: Double
+
+    @Argument(help: "End Y coordinate")
+    var toY: Double
+
+    @Option(name: .long, help: "Swipe duration in seconds (default: 0.3)")
+    var duration: Double = 0.3
+
+    struct SwipeResult: Codable {
+        let from: [String: Double]
+        let to: [String: Double]
+        let success: Bool
+    }
+
+    func run() throws {
+        let store = SessionStore()
+        let session = store.load()
+
+        guard session.isConnected else {
+            Output.printError(code: "NOT_CONNECTED", message: "No active session",
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        if session.isSimulatorMode, let udid = session.simulatorUDID {
+            try swipeSimulator(udid: udid)
+            return
+        }
+
+        if session.isMirrorMode {
+            try swipeMirror()
+            return
+        }
+
+        guard let pid = session.pid else {
+            Output.printError(code: "NOT_CONNECTED", message: "No active session",
+                            hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        // macOS desktop mode: CGEvent drag
+        if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
+            app.activate()
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        swipeViaCGEvent(from: CGPoint(x: fromX, y: fromY), to: CGPoint(x: toX, y: toY), duration: duration)
+
+        let result = SwipeResult(from: ["x": fromX, "y": fromY], to: ["x": toX, "y": toY], success: true)
+        if globals.useJson {
+            print(Output.json(result))
+        } else {
+            print("Swiped from (\(Int(fromX)), \(Int(fromY))) to (\(Int(toX)), \(Int(toY)))")
+        }
+    }
+
+    private func swipeSimulator(udid: String) throws {
+        let bridge = SimulatorBridge(udid: udid)
+        do {
+            try bridge.swipe(fromX: fromX, fromY: fromY, toX: toX, toY: toY, duration: duration)
+            let result = SwipeResult(from: ["x": fromX, "y": fromY], to: ["x": toX, "y": toY], success: true)
+            if globals.useJson {
+                print(Output.json(result))
+            } else {
+                print("Swiped from (\(Int(fromX)), \(Int(fromY))) to (\(Int(toX)), \(Int(toY)))")
+            }
+        } catch let error as SimulatorError {
+            Output.printError(code: error.code, message: error.description,
+                            hint: error.hint, useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+    }
+
+    private func swipeMirror() throws {
+        let mirror = MirrorBridge()
+        do {
+            try mirror.swipe(fromX: fromX, fromY: fromY, toX: toX, toY: toY, duration: duration)
+            let result = SwipeResult(from: ["x": fromX, "y": fromY], to: ["x": toX, "y": toY], success: true)
+            if globals.useJson {
+                print(Output.json(result))
+            } else {
+                print("Swiped from (\(Int(fromX)), \(Int(fromY))) to (\(Int(toX)), \(Int(toY)))")
+            }
+        } catch let error as MirrorError {
+            Output.printError(code: error.code, message: error.description,
+                            hint: error.hint, useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+    }
+
+    private func swipeViaCGEvent(from: CGPoint, to: CGPoint, duration: Double) {
+        #if canImport(AppKit)
+        let steps = max(Int(duration * 60), 5) // ~60fps
+        guard let mouseDown = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
+                                       mouseCursorPosition: from, mouseButton: .left) else { return }
+        mouseDown.post(tap: .cgSessionEventTap)
+        Thread.sleep(forTimeInterval: 0.02)
+
+        for i in 1...steps {
+            let progress = Double(i) / Double(steps)
+            let x = from.x + (to.x - from.x) * progress
+            let y = from.y + (to.y - from.y) * progress
+            if let drag = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged,
+                                   mouseCursorPosition: CGPoint(x: x, y: y), mouseButton: .left) {
+                drag.post(tap: .cgSessionEventTap)
+            }
+            Thread.sleep(forTimeInterval: duration / Double(steps))
+        }
+
+        if let mouseUp = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
+                                  mouseCursorPosition: to, mouseButton: .left) {
+            mouseUp.post(tap: .cgSessionEventTap)
+        }
+        #endif
     }
 }
 
@@ -1235,10 +2115,14 @@ func allSchemas() -> [CommandSchema] { return [
     CommandSchema(name: "doctor", description: "Check prerequisites and diagnose issues",
         args: [], flags: [.init(name: "--json", type: "bool", defaultValue: "false")],
         exitCodes: ["0": "success", "2": "error"]),
-    CommandSchema(name: "connect", description: "Connect to a macOS app",
+    CommandSchema(name: "connect", description: "Connect to a macOS app, iOS Simulator, or iPhone Mirroring",
         args: [], flags: [
             .init(name: "--pid", type: "int", defaultValue: nil),
             .init(name: "--bundle-id", type: "string", defaultValue: nil),
+            .init(name: "--simulator", type: "string", defaultValue: nil),
+            .init(name: "--udid", type: "string", defaultValue: nil),
+            .init(name: "--sim", type: "bool", defaultValue: "false"),
+            .init(name: "--mirror", type: "bool", defaultValue: "false"),
             .init(name: "--json", type: "bool", defaultValue: "false")
         ], exitCodes: ["0": "success", "2": "error"]),
     CommandSchema(name: "disconnect", description: "Disconnect from app",
@@ -1250,6 +2134,7 @@ func allSchemas() -> [CommandSchema] { return [
     CommandSchema(name: "snapshot", description: "Capture element tree with refs",
         args: [], flags: [
             .init(name: "-i", type: "bool", defaultValue: "false"),
+            .init(name: "--all", type: "bool", defaultValue: "false"),
             .init(name: "--json", type: "bool", defaultValue: "false")
         ], exitCodes: ["0": "success", "2": "error"]),
     CommandSchema(name: "press", description: "Press element by ref",
@@ -1264,9 +2149,8 @@ func allSchemas() -> [CommandSchema] { return [
         args: [.init(name: "property", type: "string", required: true), .init(name: "ref", type: "string", required: true)],
         flags: [.init(name: "--json", type: "bool", defaultValue: "false")],
         exitCodes: ["0": "success", "2": "error"]),
-    CommandSchema(name: "find", description: "Find element by locator",
-        args: [.init(name: "locator", type: "string", required: true), .init(name: "value", type: "string", required: true),
-               .init(name: "action", type: "string", required: false), .init(name: "actionArg", type: "string", required: false)],
+    CommandSchema(name: "find", description: "Find element by locator (supports compound: find role button text Open press)",
+        args: [.init(name: "remaining", type: "string...", required: true)],
         flags: [.init(name: "--json", type: "bool", defaultValue: "false")],
         exitCodes: ["0": "success", "2": "error"]),
     CommandSchema(name: "screenshot", description: "Capture app screenshot",
@@ -1295,6 +2179,19 @@ func allSchemas() -> [CommandSchema] { return [
                .init(name: "y", type: "number", required: false)],
         flags: [.init(name: "--json", type: "bool", defaultValue: "false")],
         exitCodes: ["0": "success", "2": "error"]),
+    CommandSchema(name: "type", description: "Type text into focused field",
+        args: [.init(name: "text", type: "string", required: true)],
+        flags: [.init(name: "--json", type: "bool", defaultValue: "false")],
+        exitCodes: ["0": "success", "2": "error"]),
+    CommandSchema(name: "swipe", description: "Swipe gesture by coordinates",
+        args: [.init(name: "fromX", type: "number", required: true),
+               .init(name: "fromY", type: "number", required: true),
+               .init(name: "toX", type: "number", required: true),
+               .init(name: "toY", type: "number", required: true)],
+        flags: [
+            .init(name: "--duration", type: "number", defaultValue: "0.3"),
+            .init(name: "--json", type: "bool", defaultValue: "false")
+        ], exitCodes: ["0": "success", "2": "error"]),
     CommandSchema(name: "schema", description: "Show command schema",
         args: [.init(name: "command", type: "string", required: false)],
         flags: [], exitCodes: ["0": "success", "2": "error"]),
