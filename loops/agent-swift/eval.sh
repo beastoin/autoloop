@@ -40,7 +40,7 @@ core_commands = {"doctor", "connect", "disconnect", "status", "snapshot", "press
 full_commands = {
     "doctor", "connect", "disconnect", "status", "snapshot", "press", "fill",
     "get", "find", "wait", "is", "scroll", "screenshot", "schema", "click",
-    "type", "swipe", "record"
+    "type", "swipe", "record", "frames"
 }
 
 if mode == "json":
@@ -142,6 +142,9 @@ if [ -f "loops/agent-swift/program-phase11.md" ]; then
 fi
 if [ -f "loops/agent-swift/program-phase12.md" ]; then
   PHASE=13  # Screen video recording
+fi
+if [ -f "loops/agent-swift/program-phase13.md" ]; then
+  PHASE=14  # Frame processing: resize, dedup, crop
 fi
 echo "phase:            $PHASE"
 
@@ -1515,6 +1518,96 @@ if [ "$PHASE" -ge 13 ] && [ "$CLI_STATUS" = "pass" ]; then
 fi
 echo "p13_recording:    $P13_RECORDING"
 
+# Phase 14 gates: Frame processing (resize, dedup, crop, batch)
+P14_FRAME_PROC="skip"
+if [ "$PHASE" -ge 14 ] && [ "$BUILD_STATUS" = "pass" ]; then
+  P14_PASS=0
+  P14_TOTAL=0
+
+  # 1. record frame --help mentions --max-width
+  P14_TOTAL=$((P14_TOTAL + 1))
+  if "$BINARY_PATH" record frame --help 2>&1 | grep -q "max-width"; then
+    P14_PASS=$((P14_PASS + 1))
+  fi
+
+  # 2. record frame --help mentions --crop
+  P14_TOTAL=$((P14_TOTAL + 1))
+  if "$BINARY_PATH" record frame --help 2>&1 | grep -q "\-\-crop"; then
+    P14_PASS=$((P14_PASS + 1))
+  fi
+
+  # 3. record frame --help mentions --dedup-threshold
+  P14_TOTAL=$((P14_TOTAL + 1))
+  if "$BINARY_PATH" record frame --help 2>&1 | grep -q "dedup-threshold"; then
+    P14_PASS=$((P14_PASS + 1))
+  fi
+
+  # 4. record frames subcommand exists
+  P14_TOTAL=$((P14_TOTAL + 1))
+  if "$BINARY_PATH" record frames --help 2>&1 | grep -q "frames\|every\|batch"; then
+    P14_PASS=$((P14_PASS + 1))
+  fi
+
+  # 5. record frames --help mentions --every
+  P14_TOTAL=$((P14_TOTAL + 1))
+  if "$BINARY_PATH" record frames --help 2>&1 | grep -q "\-\-every"; then
+    P14_PASS=$((P14_PASS + 1))
+  fi
+
+  # 6. schema mentions --max-width or --crop or --dedup-threshold
+  P14_TOTAL=$((P14_TOTAL + 1))
+  if "$BINARY_PATH" schema 2>&1 | grep -q "max-width\|dedup-threshold\|crop"; then
+    P14_PASS=$((P14_PASS + 1))
+  fi
+
+  # 7. lastFramePath in source
+  P14_TOTAL=$((P14_TOTAL + 1))
+  if grep -rq "lastFramePath" "$AGENT_SWIFT_DIR/Sources/"; then
+    P14_PASS=$((P14_PASS + 1))
+  fi
+
+  # 8. sips in source (for resize/crop)
+  P14_TOTAL=$((P14_TOTAL + 1))
+  if grep -rq "sips" "$AGENT_SWIFT_DIR/Sources/"; then
+    P14_PASS=$((P14_PASS + 1))
+  fi
+
+  # 9. FrameProcessingTests.swift exists
+  P14_TOTAL=$((P14_TOTAL + 1))
+  if [ -f "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/FrameProcessingTests.swift" ]; then
+    P14_PASS=$((P14_PASS + 1))
+  fi
+
+  # 10. >= 15 assertions in FrameProcessingTests
+  P14_TOTAL=$((P14_TOTAL + 1))
+  FP_ASSERTS=0
+  if [ -f "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/FrameProcessingTests.swift" ]; then
+    FP_ASSERTS=$(grep -c "XCTAssert" "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/FrameProcessingTests.swift" 2>/dev/null || echo 0)
+  fi
+  if [ "$FP_ASSERTS" -ge 15 ]; then
+    P14_PASS=$((P14_PASS + 1))
+  fi
+
+  # 11. version 0.9.x
+  P14_TOTAL=$((P14_TOTAL + 1))
+  if "$BINARY_PATH" --version 2>&1 | grep -qE "^0\.9\.[0-9]+"; then
+    P14_PASS=$((P14_PASS + 1))
+  fi
+
+  # 12. total tests >= 195
+  P14_TOTAL=$((P14_TOTAL + 1))
+  if [ "$TEST_COUNT" -ge 195 ]; then
+    P14_PASS=$((P14_PASS + 1))
+  fi
+
+  if [ "$P14_PASS" -eq "$P14_TOTAL" ]; then
+    P14_FRAME_PROC="pass"
+  else
+    P14_FRAME_PROC="fail ($P14_PASS/$P14_TOTAL)"
+  fi
+fi
+echo "p14_frame_proc:   $P14_FRAME_PROC"
+
 # Step 5: E2E test (optional; enabled when e2e-test.sh exists)
 E2E_STATUS="skip"
 if [ -x "loops/agent-swift/e2e-test.sh" ]; then
@@ -1690,6 +1783,25 @@ if [ "$BUILD_STATUS" = "pass" ] && [ "$TEST_STATUS" = "pass" ] && [ "$CONTRACT_S
          [ "$P11_CGEVENT_SIM" = "pass" ] && \
          [ "$P12_USER_UX" = "pass" ] && \
          [ "$P13_RECORDING" = "pass" ]; then
+        PHASE_COMPLETE="yes"
+      fi
+      ;;
+    14)
+      if [ "$HELP_STATUS" = "pass" ] && \
+         [ "$JSON_STATUS" = "pass" ] && \
+         [ "$EXIT_STATUS" = "pass" ] && \
+         [ "$P3_INTERACTION" = "pass" ] && \
+         [ "$P4_AUTONOMY" = "pass" ] && \
+         [ "$P5_POLISH" = "pass" ] && \
+         [ "$P2B_WIDGET" = "pass" ] && \
+         [ "$P7_CLICK" = "pass" ] && \
+         [ "$P8_SIMULATOR" = "pass" ] && \
+         [ "$P9_IDB" = "pass" ] && \
+         [ "$P10_MIRROR" = "pass" ] && \
+         [ "$P11_CGEVENT_SIM" = "pass" ] && \
+         [ "$P12_USER_UX" = "pass" ] && \
+         [ "$P13_RECORDING" = "pass" ] && \
+         [ "$P14_FRAME_PROC" = "pass" ]; then
         PHASE_COMPLETE="yes"
       fi
       ;;
