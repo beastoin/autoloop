@@ -8,7 +8,7 @@ struct AgentSwift: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "agent-swift",
         abstract: "CLI for AI agents to control macOS apps via Accessibility API",
-        version: "0.8.1",
+        version: "0.8.2",
         subcommands: [
             DoctorCommand.self,
             ConnectCommand.self,
@@ -2358,6 +2358,12 @@ struct RecordFrameCommand: ParsableCommand {
             During recording: returns a live screenshot (current screen).
             After record stop: extracts the exact frame at --at timestamp from the finalized video.
             Lookback to a past timestamp requires stopping the recording first.
+
+            Video resolution order:
+              1. --video flag (explicit path — always wins)
+              2. Active recording's video path
+              3. Last stopped recording's video path (from session)
+              4. Error — no guessing
             """
     )
 
@@ -2365,6 +2371,9 @@ struct RecordFrameCommand: ParsableCommand {
 
     @Option(name: .long, help: "Timestamp in seconds (e.g. 4.0)")
     var at: Double
+
+    @Option(name: .long, help: "Path to video file (default: last recording from session)")
+    var video: String?
 
     @Option(name: .long, help: "Output file path (default: auto-generated)")
     var output: String?
@@ -2415,19 +2424,30 @@ struct RecordFrameCommand: ParsableCommand {
             // Process is dead but recording wasn't cleaned up — try the video file
         }
 
-        // Look for video: active recording path > last stopped video > latest file in session dir
-        let videoPath = session.recording?.videoPath ?? session.lastVideoPath ?? findLatestVideo(in: sessionDir)
-
-        guard let video = videoPath, FileManager.default.fileExists(atPath: video) else {
+        // Video resolution: --video flag > active recording > lastVideoPath > error (no guessing)
+        let resolvedVideo: String
+        if let explicit = video {
+            resolvedVideo = explicit
+        } else if let recordingPath = session.recording?.videoPath {
+            resolvedVideo = recordingPath
+        } else if let lastPath = session.lastVideoPath {
+            resolvedVideo = lastPath
+        } else {
             Output.printError(code: "NO_VIDEO", message: "No recording video found",
-                            hint: "Start a recording first: agent-swift record start", useJson: globals.useJson)
+                            hint: "Use --video <path> or run record start/stop first", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        guard FileManager.default.fileExists(atPath: resolvedVideo) else {
+            Output.printError(code: "VIDEO_NOT_FOUND", message: "Video file does not exist: \(resolvedVideo)",
+                            hint: "Check the path or start a new recording", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
         // Extract frame from finalized video using ffmpeg
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["ffmpeg", "-y", "-ss", String(at), "-i", video, "-frames:v", "1", "-update", "1", outputPath]
+        process.arguments = ["ffmpeg", "-y", "-ss", String(at), "-i", resolvedVideo, "-frames:v", "1", "-update", "1", outputPath]
         process.standardOutput = FileHandle.nullDevice
         let stderrPipe = Pipe()
         process.standardError = stderrPipe
@@ -2445,9 +2465,9 @@ struct RecordFrameCommand: ParsableCommand {
             let stderrText = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let lastLine = stderrText.components(separatedBy: "\n").last ?? ""
             let hint = lastLine.isEmpty
-                ? "Video: \(video) — check if timestamp \(at)s is within video duration"
+                ? "Video: \(resolvedVideo) — check if timestamp \(at)s is within video duration"
                 : "ffmpeg: \(lastLine)"
-            Output.printError(code: "FRAME_EXTRACT_FAILED", message: "ffmpeg failed to extract frame at \(at)s from \(video)",
+            Output.printError(code: "FRAME_EXTRACT_FAILED", message: "ffmpeg failed to extract frame at \(at)s from \(resolvedVideo)",
                             hint: hint, useJson: globals.useJson)
             throw ExitCode(2)
         }
@@ -2501,20 +2521,6 @@ struct RecordFrameCommand: ParsableCommand {
         } else {
             print("Live frame captured → \(screenshotPath)")
         }
-    }
-
-    private func findLatestVideo(in dir: String) -> String? {
-        let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(atPath: dir) else { return nil }
-        let videos = files.filter { $0.hasPrefix("recording-") && $0.hasSuffix(".mp4") }
-        // Sort by modification time (newest first), not alphabetically
-        let sorted = videos.compactMap { name -> (String, Date)? in
-            let path = "\(dir)/\(name)"
-            guard let attrs = try? fm.attributesOfItem(atPath: path),
-                  let modDate = attrs[.modificationDate] as? Date else { return nil }
-            return (path, modDate)
-        }.sorted { $0.1 > $1.1 }
-        return sorted.first?.0
     }
 
     static func isFfmpegAvailable() -> Bool {
@@ -2685,10 +2691,11 @@ func allSchemas() -> [CommandSchema] { return [
             .init(name: "--duration", type: "number", defaultValue: "0.3"),
             .init(name: "--json", type: "bool", defaultValue: "false")
         ], exitCodes: ["0": "success", "2": "error"]),
-    CommandSchema(name: "record", description: "Screen video recording (start/stop/frame/status). Frame lookback (--at past timestamp) only works after stop; during recording, frame returns live screenshot. Use start --output to set video path.",
+    CommandSchema(name: "record", description: "Screen video recording (start/stop/frame/status). Frame lookback (--at past timestamp) only works after stop; during recording, frame returns live screenshot. Workflow: record stop returns videoPath → pass it to record frame --video <path> --at <seconds>.",
         args: [],
         flags: [
             .init(name: "--at", type: "number", defaultValue: nil),
+            .init(name: "--video", type: "string", defaultValue: nil),
             .init(name: "--output", type: "string", defaultValue: nil),
             .init(name: "--json", type: "bool", defaultValue: "false")
         ], exitCodes: ["0": "success", "2": "error"]),

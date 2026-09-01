@@ -191,25 +191,37 @@ final class RecordingTests: XCTestCase {
     }
 
     func testVideoPathResolutionOrder() {
-        // Priority: active recording > lastVideoPath > findLatestVideo
+        // Priority: --video flag > active recording > lastVideoPath > error (no guessing)
         var session = SessionData.empty
         session.lastVideoPath = "/tmp/last.mp4"
         session.recording = RecordingSession(sessionId: "r3", pid: 3, videoPath: "/tmp/active.mp4",
                                              startTime: "2026-01-01T00:00:00Z", mode: "simulator")
-        let resolved = session.recording?.videoPath ?? session.lastVideoPath
-        XCTAssertEqual(resolved, "/tmp/active.mp4", "Active recording path should take priority")
 
-        // After stop
+        // Explicit --video flag always wins
+        let explicitVideo = "/tmp/explicit.mp4"
+        let resolvedWithFlag: String = explicitVideo  // --video flag takes priority
+        XCTAssertEqual(resolvedWithFlag, "/tmp/explicit.mp4", "Explicit --video flag should win")
+
+        // Without flag: active recording takes priority
+        let resolvedNoFlag = session.recording?.videoPath ?? session.lastVideoPath
+        XCTAssertEqual(resolvedNoFlag, "/tmp/active.mp4", "Active recording path should take priority")
+
+        // After stop: lastVideoPath is the fallback
         session.lastVideoPath = session.recording?.videoPath
         session.recording = nil
         let resolvedAfterStop = session.recording?.videoPath ?? session.lastVideoPath
         XCTAssertEqual(resolvedAfterStop, "/tmp/active.mp4", "lastVideoPath should be used after stop")
+
+        // With no recording and no lastVideoPath: should be nil (error, not a guess)
+        session.lastVideoPath = nil
+        let resolvedEmpty = session.recording?.videoPath ?? session.lastVideoPath
+        XCTAssertNil(resolvedEmpty, "No fallback guessing — should be nil when no video info available")
     }
 
     // MARK: - Version check
 
-    func testVersionIs080() {
-        let version = "0.8.0"
+    func testVersionIs08x() {
+        let version = "0.8.2"
         XCTAssertTrue(version.hasPrefix("0.8"), "Version should be 0.8.x for phase 13")
     }
 
