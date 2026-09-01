@@ -8,7 +8,7 @@ struct AgentSwift: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "agent-swift",
         abstract: "CLI for AI agents to control macOS apps via Accessibility API",
-        version: "0.8.0",
+        version: "0.8.1",
         subcommands: [
             DoctorCommand.self,
             ConnectCommand.self,
@@ -2293,7 +2293,8 @@ struct RecordStopCommand: ParsableCommand {
         let sessionId = recording.sessionId
         let videoPath = recording.videoPath
 
-        // Clear recording from session
+        // Clear recording but preserve video path for frame extraction
+        session.lastVideoPath = recording.videoPath
         session.recording = nil
         try store.save(session)
 
@@ -2414,8 +2415,8 @@ struct RecordFrameCommand: ParsableCommand {
             // Process is dead but recording wasn't cleaned up — try the video file
         }
 
-        // Look for the most recent video file in session dir
-        let videoPath = session.recording?.videoPath ?? findLatestVideo(in: sessionDir)
+        // Look for video: active recording path > last stopped video > latest file in session dir
+        let videoPath = session.recording?.videoPath ?? session.lastVideoPath ?? findLatestVideo(in: sessionDir)
 
         guard let video = videoPath, FileManager.default.fileExists(atPath: video) else {
             Output.printError(code: "NO_VIDEO", message: "No recording video found",
@@ -2428,7 +2429,8 @@ struct RecordFrameCommand: ParsableCommand {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["ffmpeg", "-y", "-ss", String(at), "-i", video, "-frames:v", "1", "-update", "1", outputPath]
         process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        let stderrPipe = Pipe()
+        process.standardError = stderrPipe
         do {
             try process.run()
             process.waitUntilExit()
@@ -2439,8 +2441,14 @@ struct RecordFrameCommand: ParsableCommand {
         }
 
         guard process.terminationStatus == 0, FileManager.default.fileExists(atPath: outputPath) else {
-            Output.printError(code: "FRAME_EXTRACT_FAILED", message: "ffmpeg failed to extract frame at \(at)s",
-                            hint: "The timestamp may be beyond the video duration", useJson: globals.useJson)
+            let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            let stderrText = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let lastLine = stderrText.components(separatedBy: "\n").last ?? ""
+            let hint = lastLine.isEmpty
+                ? "Video: \(video) — check if timestamp \(at)s is within video duration"
+                : "ffmpeg: \(lastLine)"
+            Output.printError(code: "FRAME_EXTRACT_FAILED", message: "ffmpeg failed to extract frame at \(at)s from \(video)",
+                            hint: hint, useJson: globals.useJson)
             throw ExitCode(2)
         }
 
@@ -2499,8 +2507,14 @@ struct RecordFrameCommand: ParsableCommand {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(atPath: dir) else { return nil }
         let videos = files.filter { $0.hasPrefix("recording-") && $0.hasSuffix(".mp4") }
-            .sorted().reversed()
-        return videos.first.map { "\(dir)/\($0)" }
+        // Sort by modification time (newest first), not alphabetically
+        let sorted = videos.compactMap { name -> (String, Date)? in
+            let path = "\(dir)/\(name)"
+            guard let attrs = try? fm.attributesOfItem(atPath: path),
+                  let modDate = attrs[.modificationDate] as? Date else { return nil }
+            return (path, modDate)
+        }.sorted { $0.1 > $1.1 }
+        return sorted.first?.0
     }
 
     static func isFfmpegAvailable() -> Bool {
