@@ -40,7 +40,7 @@ core_commands = {"doctor", "connect", "disconnect", "status", "snapshot", "press
 full_commands = {
     "doctor", "connect", "disconnect", "status", "snapshot", "press", "fill",
     "get", "find", "wait", "is", "scroll", "screenshot", "schema", "click",
-    "type", "swipe", "record", "frames"
+    "type", "swipe", "record"
 }
 
 if mode == "json":
