@@ -8,7 +8,7 @@ struct AgentSwift: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "agent-swift",
         abstract: "CLI for AI agents to control macOS apps via Accessibility API",
-        version: "0.8.2",
+        version: "0.9.0",
         subcommands: [
             DoctorCommand.self,
             ConnectCommand.self,
@@ -2132,6 +2132,7 @@ struct RecordCommand: ParsableCommand {
             RecordStartCommand.self,
             RecordStopCommand.self,
             RecordFrameCommand.self,
+            RecordFramesCommand.self,
             RecordStatusCommand.self
         ]
     )
@@ -2364,6 +2365,11 @@ struct RecordFrameCommand: ParsableCommand {
               2. Active recording's video path
               3. Last stopped recording's video path (from session)
               4. Error — no guessing
+
+            Processing flags (applied after extraction):
+              --max-width <pixels>  Downscale to fit width (preserves aspect ratio, no upscale)
+              --crop <x,y,w,h>      Crop to region (clamped to valid area)
+              --dedup-threshold <0-1> Skip if similar to last extracted frame
             """
     )
 
@@ -2378,21 +2384,52 @@ struct RecordFrameCommand: ParsableCommand {
     @Option(name: .long, help: "Output file path (default: auto-generated)")
     var output: String?
 
+    @Option(name: .long, help: "Max width in pixels — downscale to fit (no upscale)")
+    var maxWidth: Int?
+
+    @Option(name: .long, help: "Crop region: x,y,width,height (clamped to frame bounds)")
+    var crop: String?
+
+    @Option(name: .long, help: "Skip if similarity to last frame >= threshold (0.0-1.0)")
+    var dedupThreshold: Double?
+
     struct FrameResult: Codable {
         let path: String
         let timestamp: Double
         let source: String  // "live" or "video"
         let success: Bool
+        let width: Int?
+        let height: Int?
+        let skipped: Bool?
+        let reason: String?
+        let similarity: Double?
     }
 
     func run() throws {
         let store = SessionStore()
-        let session = store.load()
+        var session = store.load()
 
         guard at >= 0 else {
             Output.printError(code: "INVALID_ARGS", message: "Timestamp must be >= 0",
                             hint: "Example: agent-swift record frame --at 4.0", useJson: globals.useJson)
             throw ExitCode(2)
+        }
+
+        if let threshold = dedupThreshold {
+            guard threshold >= 0 && threshold <= 1.0 else {
+                Output.printError(code: "INVALID_ARGS", message: "dedup-threshold must be between 0.0 and 1.0",
+                                hint: "Example: --dedup-threshold 0.95", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+        }
+
+        if let cropStr = crop {
+            let parts = cropStr.split(separator: ",")
+            guard parts.count == 4, parts.allSatisfy({ Int($0) != nil }) else {
+                Output.printError(code: "INVALID_ARGS", message: "crop format must be x,y,width,height (integers)",
+                                hint: "Example: --crop 0,200,1206,800", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
         }
 
         // Check if ffmpeg is available
@@ -2403,28 +2440,18 @@ struct RecordFrameCommand: ParsableCommand {
         }
 
         // Determine output path
-        let sessionDir: String
-        if let home = ProcessInfo.processInfo.environment["AGENT_SWIFT_HOME"] {
-            sessionDir = home
-        } else {
-            sessionDir = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".agent-swift").path
-        }
+        let sessionDir = Self.resolveSessionDir()
         try FileManager.default.createDirectory(atPath: sessionDir, withIntermediateDirectories: true)
         let outputPath = output ?? "\(sessionDir)/frame-\(String(format: "%.1f", at))s.png"
 
         if let recording = session.recording {
-            // Recording is active — check if the process is still running
             if kill(recording.pid, 0) == 0 {
-                // Recording is live — use screenshot for live capture
-                // (video file is not finalized during recording)
-                try extractLiveFrame(session: session, outputPath: outputPath)
+                try extractLiveFrame(session: session, outputPath: outputPath, store: store)
                 return
             }
-            // Process is dead but recording wasn't cleaned up — try the video file
         }
 
-        // Video resolution: --video flag > active recording > lastVideoPath > error (no guessing)
+        // Video resolution: --video flag > active recording > lastVideoPath > error
         let resolvedVideo: String
         if let explicit = video {
             resolvedVideo = explicit
@@ -2444,60 +2471,66 @@ struct RecordFrameCommand: ParsableCommand {
             throw ExitCode(2)
         }
 
-        // Extract frame from finalized video using ffmpeg
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["ffmpeg", "-y", "-ss", String(at), "-i", resolvedVideo, "-frames:v", "1", "-update", "1", outputPath]
-        process.standardOutput = FileHandle.nullDevice
-        let stderrPipe = Pipe()
-        process.standardError = stderrPipe
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            Output.printError(code: "FRAME_EXTRACT_FAILED", message: "Failed to run ffmpeg: \(error.localizedDescription)",
-                            hint: nil, useJson: globals.useJson)
-            throw ExitCode(2)
+        // Extract frame
+        try Self.extractFrame(from: resolvedVideo, at: at, to: outputPath, useJson: globals.useJson)
+
+        // Apply crop
+        if let cropStr = crop {
+            try Self.applyCrop(to: outputPath, cropStr: cropStr)
         }
 
-        guard process.terminationStatus == 0, FileManager.default.fileExists(atPath: outputPath) else {
-            let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-            let stderrText = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let lastLine = stderrText.components(separatedBy: "\n").last ?? ""
-            let hint = lastLine.isEmpty
-                ? "Video: \(resolvedVideo) — check if timestamp \(at)s is within video duration"
-                : "ffmpeg: \(lastLine)"
-            Output.printError(code: "FRAME_EXTRACT_FAILED", message: "ffmpeg failed to extract frame at \(at)s from \(resolvedVideo)",
-                            hint: hint, useJson: globals.useJson)
-            throw ExitCode(2)
+        // Apply resize
+        if let maxW = maxWidth {
+            Self.applyResize(to: outputPath, maxWidth: maxW)
         }
 
-        let result = FrameResult(path: outputPath, timestamp: at, source: "video", success: true)
+        // Dedup check
+        if let threshold = dedupThreshold, let lastFrame = session.lastFramePath,
+           FileManager.default.fileExists(atPath: lastFrame) {
+            let similarity = Self.computeSimilarity(file1: lastFrame, file2: outputPath)
+            if similarity >= threshold {
+                try FileManager.default.removeItem(atPath: outputPath)
+                let result = FrameResult(path: outputPath, timestamp: at, source: "video", success: true,
+                                        width: nil, height: nil, skipped: true, reason: "duplicate", similarity: similarity)
+                if globals.useJson {
+                    print(Output.json(result))
+                } else {
+                    print("Skipped (similarity \(String(format: "%.2f", similarity)) >= \(threshold))")
+                }
+                return
+            }
+        }
+
+        // Get dimensions
+        let dims = Self.getImageDimensions(path: outputPath)
+
+        // Update lastFramePath
+        session.lastFramePath = outputPath
+        try store.save(session)
+
+        let result = FrameResult(path: outputPath, timestamp: at, source: "video", success: true,
+                                width: dims?.0, height: dims?.1, skipped: false, reason: nil, similarity: nil)
         if globals.useJson {
             print(Output.json(result))
         } else {
-            print("Frame extracted at \(at)s → \(outputPath)")
+            var msg = "Frame extracted at \(at)s → \(outputPath)"
+            if let (w, h) = dims { msg += " (\(w)×\(h))" }
+            print(msg)
         }
     }
 
-    private func extractLiveFrame(session: SessionData, outputPath: String) throws {
-        // During active recording, take a live screenshot instead
+    private func extractLiveFrame(session: SessionData, outputPath: String, store: SessionStore) throws {
         let screenshotPath = outputPath
-
         if session.isSimulatorMode, let udid = session.simulatorUDID {
             let bridge = SimulatorBridge(udid: udid)
-            do {
-                try bridge.screenshot(to: screenshotPath)
-            } catch {
+            do { try bridge.screenshot(to: screenshotPath) } catch {
                 Output.printError(code: "LIVE_FRAME_FAILED", message: "Failed to capture live frame: \(error)",
                                 hint: nil, useJson: globals.useJson)
                 throw ExitCode(2)
             }
         } else if session.isMirrorMode {
             let mirror = MirrorBridge()
-            do {
-                try mirror.screenshot(to: screenshotPath)
-            } catch {
+            do { try mirror.screenshot(to: screenshotPath) } catch {
                 Output.printError(code: "LIVE_FRAME_FAILED", message: "Failed to capture live frame: \(error)",
                                 hint: nil, useJson: globals.useJson)
                 throw ExitCode(2)
@@ -2515,12 +2548,177 @@ struct RecordFrameCommand: ParsableCommand {
             throw ExitCode(2)
         }
 
-        let result = FrameResult(path: screenshotPath, timestamp: at, source: "live", success: true)
+        // Apply processing to live frames too
+        if let cropStr = crop {
+            try Self.applyCrop(to: screenshotPath, cropStr: cropStr)
+        }
+        if let maxW = maxWidth {
+            Self.applyResize(to: screenshotPath, maxWidth: maxW)
+        }
+
+        let dims = Self.getImageDimensions(path: screenshotPath)
+        var updatedSession = session
+        updatedSession.lastFramePath = screenshotPath
+        try store.save(updatedSession)
+
+        let result = FrameResult(path: screenshotPath, timestamp: at, source: "live", success: true,
+                                width: dims?.0, height: dims?.1, skipped: false, reason: nil, similarity: nil)
         if globals.useJson {
             print(Output.json(result))
         } else {
             print("Live frame captured → \(screenshotPath)")
         }
+    }
+
+    // MARK: - Frame processing helpers (static for reuse by RecordFramesCommand)
+
+    static func resolveSessionDir() -> String {
+        if let home = ProcessInfo.processInfo.environment["AGENT_SWIFT_HOME"] {
+            return home
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".agent-swift").path
+    }
+
+    static func extractFrame(from video: String, at timestamp: Double, to outputPath: String, useJson: Bool) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["ffmpeg", "-y", "-ss", String(timestamp), "-i", video, "-frames:v", "1", "-update", "1", outputPath]
+        process.standardOutput = FileHandle.nullDevice
+        let stderrPipe = Pipe()
+        process.standardError = stderrPipe
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            Output.printError(code: "FRAME_EXTRACT_FAILED", message: "Failed to run ffmpeg: \(error.localizedDescription)",
+                            hint: nil, useJson: useJson)
+            throw ExitCode(2)
+        }
+        guard process.terminationStatus == 0, FileManager.default.fileExists(atPath: outputPath) else {
+            let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            let stderrText = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let lastLine = stderrText.components(separatedBy: "\n").last ?? ""
+            let hint = lastLine.isEmpty
+                ? "Video: \(video) — check if timestamp \(timestamp)s is within video duration"
+                : "ffmpeg: \(lastLine)"
+            Output.printError(code: "FRAME_EXTRACT_FAILED", message: "ffmpeg failed to extract frame at \(timestamp)s from \(video)",
+                            hint: hint, useJson: useJson)
+            throw ExitCode(2)
+        }
+    }
+
+    static func applyResize(to path: String, maxWidth: Int) {
+        // sips -Z resizes to fit within a square, but we want max-width only
+        // Get current dimensions first
+        guard let (w, _) = getImageDimensions(path: path), w > maxWidth else { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sips")
+        process.arguments = ["--resampleWidth", String(maxWidth), path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        process.waitUntilExit()
+    }
+
+    static func applyCrop(to path: String, cropStr: String) throws {
+        let parts = cropStr.split(separator: ",").compactMap { Int($0) }
+        guard parts.count == 4 else { return }
+        var x = parts[0], y = parts[1], w = parts[2], h = parts[3]
+
+        // Get current dimensions and clamp
+        if let (imgW, imgH) = getImageDimensions(path: path) {
+            x = max(0, min(x, imgW - 1))
+            y = max(0, min(y, imgH - 1))
+            w = min(w, imgW - x)
+            h = min(h, imgH - y)
+        }
+        guard w > 0 && h > 0 else { return }
+
+        // sips crop: --cropToHeightWidth <h> <w> removes from bottom-right,
+        // then --cropOffset <y> <x> shifts the crop origin
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sips")
+        process.arguments = ["--cropToHeightWidth", String(h), String(w), "--cropOffset", String(y), String(x), path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+    }
+
+    static func getImageDimensions(path: String) -> (Int, Int)? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sips")
+        process.arguments = ["-g", "pixelWidth", "-g", "pixelHeight", path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            var width: Int?, height: Int?
+            for line in output.components(separatedBy: "\n") {
+                if line.contains("pixelWidth") {
+                    width = Int(line.components(separatedBy: ":").last?.trimmingCharacters(in: .whitespaces) ?? "")
+                } else if line.contains("pixelHeight") {
+                    height = Int(line.components(separatedBy: ":").last?.trimmingCharacters(in: .whitespaces) ?? "")
+                }
+            }
+            if let w = width, let h = height { return (w, h) }
+        } catch {}
+        return nil
+    }
+
+    static func computeSimilarity(file1: String, file2: String) -> Double {
+        // Thumbnail-based comparison: resize both to 32x32, compare pixel data
+        let tmpDir = NSTemporaryDirectory()
+        let thumb1 = "\(tmpDir)/dedup-thumb1.png"
+        let thumb2 = "\(tmpDir)/dedup-thumb2.png"
+        defer {
+            try? FileManager.default.removeItem(atPath: thumb1)
+            try? FileManager.default.removeItem(atPath: thumb2)
+        }
+
+        // Create thumbnails with sips
+        for (src, dst) in [(file1, thumb1), (file2, thumb2)] {
+            try? FileManager.default.copyItem(atPath: src, toPath: dst)
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/sips")
+            process.arguments = ["-Z", "32", dst]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try? process.run()
+            process.waitUntilExit()
+        }
+
+        // Load both as NSImage and compare pixel data
+        guard let img1 = NSImage(contentsOfFile: thumb1),
+              let img2 = NSImage(contentsOfFile: thumb2),
+              let rep1 = img1.tiffRepresentation.flatMap({ NSBitmapImageRep(data: $0) }),
+              let rep2 = img2.tiffRepresentation.flatMap({ NSBitmapImageRep(data: $0) }) else {
+            return 0.0
+        }
+
+        let w = min(rep1.pixelsWide, rep2.pixelsWide)
+        let h = min(rep1.pixelsHigh, rep2.pixelsHigh)
+        guard w > 0 && h > 0 else { return 0.0 }
+
+        var totalDiff: Double = 0
+        var pixelCount = 0
+        for y in 0..<h {
+            for x in 0..<w {
+                guard let c1 = rep1.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
+                      let c2 = rep2.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                let dr = abs(c1.redComponent - c2.redComponent)
+                let dg = abs(c1.greenComponent - c2.greenComponent)
+                let db = abs(c1.blueComponent - c2.blueComponent)
+                totalDiff += Double(dr + dg + db) / 3.0
+                pixelCount += 1
+            }
+        }
+        guard pixelCount > 0 else { return 0.0 }
+        return 1.0 - (totalDiff / Double(pixelCount))
     }
 
     static func isFfmpegAvailable() -> Bool {
@@ -2601,6 +2799,160 @@ struct RecordStatusCommand: ParsableCommand {
                 print(Output.json(result))
             } else {
                 print("No active recording")
+            }
+        }
+    }
+}
+
+// MARK: - Batch frame extraction
+
+struct RecordFramesCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "frames",
+        abstract: "Extract multiple frames from a video",
+        discussion: """
+            Batch frame extraction with optional dedup and resize.
+            Use --every for regular intervals or --at for specific timestamps.
+            """
+    )
+
+    @OptionGroup var globals: GlobalOptions
+
+    @Option(name: .long, help: "Path to video file (required)")
+    var video: String
+
+    @Option(name: .long, help: "Extract one frame every N seconds")
+    var every: Double?
+
+    @Option(name: .long, help: "Specific timestamps (comma-separated, e.g. 1.0,5.0,10.0)")
+    var at: String?
+
+    @Option(name: .long, help: "Max width in pixels — downscale to fit (no upscale)")
+    var maxWidth: Int?
+
+    @Option(name: .long, help: "Skip if similarity to previous frame >= threshold (0.0-1.0)")
+    var dedupThreshold: Double?
+
+    @Option(name: .long, help: "Output directory (default: session dir)")
+    var outputDir: String?
+
+    struct BatchFrameEntry: Codable {
+        let path: String
+        let timestamp: Double
+        let skipped: Bool
+        let width: Int?
+        let height: Int?
+        let similarity: Double?
+    }
+
+    struct BatchResult: Codable {
+        let video: String
+        let frames: [BatchFrameEntry]
+        let extracted: Int
+        let skipped: Int
+        let total: Int
+    }
+
+    func run() throws {
+        guard FileManager.default.fileExists(atPath: video) else {
+            Output.printError(code: "VIDEO_NOT_FOUND", message: "Video file does not exist: \(video)",
+                            hint: "Check the path", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        guard RecordFrameCommand.isFfmpegAvailable() else {
+            Output.printError(code: "FFMPEG_NOT_FOUND", message: "ffmpeg is not installed",
+                            hint: "Install with: brew install ffmpeg", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        // Get video duration
+        guard let duration = RecordStopCommand.getVideoDuration(path: video) else {
+            Output.printError(code: "VIDEO_READ_FAILED", message: "Could not read video duration",
+                            hint: "Check if the video file is valid", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        // Build timestamp list
+        var timestamps: [Double] = []
+        if let everyN = every {
+            guard everyN > 0 else {
+                Output.printError(code: "INVALID_ARGS", message: "--every must be > 0",
+                                hint: "Example: --every 2.0", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            var t = 0.0
+            while t < duration {
+                timestamps.append(t)
+                t += everyN
+            }
+        } else if let atStr = at {
+            timestamps = atStr.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            guard !timestamps.isEmpty else {
+                Output.printError(code: "INVALID_ARGS", message: "No valid timestamps in --at",
+                                hint: "Example: --at 1.0,5.0,10.0", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+        } else {
+            Output.printError(code: "INVALID_ARGS", message: "Specify --every <seconds> or --at <timestamps>",
+                            hint: "Example: --every 2.0 or --at 1.0,5.0,10.0", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        // Determine output directory
+        let outDir = outputDir ?? RecordFrameCommand.resolveSessionDir()
+        try FileManager.default.createDirectory(atPath: outDir, withIntermediateDirectories: true)
+
+        var results: [BatchFrameEntry] = []
+        var lastExtractedPath: String? = nil
+        var extractedCount = 0
+        var skippedCount = 0
+
+        for ts in timestamps {
+            let outputPath = "\(outDir)/frame-\(String(format: "%.1f", ts))s.png"
+
+            do {
+                try RecordFrameCommand.extractFrame(from: video, at: ts, to: outputPath, useJson: globals.useJson)
+            } catch {
+                // Skip frames that fail (e.g. beyond duration)
+                continue
+            }
+
+            // Apply resize
+            if let maxW = maxWidth {
+                RecordFrameCommand.applyResize(to: outputPath, maxWidth: maxW)
+            }
+
+            // Dedup check
+            if let threshold = dedupThreshold, let lastPath = lastExtractedPath,
+               FileManager.default.fileExists(atPath: lastPath) {
+                let similarity = RecordFrameCommand.computeSimilarity(file1: lastPath, file2: outputPath)
+                if similarity >= threshold {
+                    try? FileManager.default.removeItem(atPath: outputPath)
+                    results.append(BatchFrameEntry(path: outputPath, timestamp: ts, skipped: true,
+                                                   width: nil, height: nil, similarity: similarity))
+                    skippedCount += 1
+                    continue
+                }
+            }
+
+            let dims = RecordFrameCommand.getImageDimensions(path: outputPath)
+            results.append(BatchFrameEntry(path: outputPath, timestamp: ts, skipped: false,
+                                           width: dims?.0, height: dims?.1, similarity: nil))
+            lastExtractedPath = outputPath
+            extractedCount += 1
+        }
+
+        let batchResult = BatchResult(video: video, frames: results, extracted: extractedCount,
+                                      skipped: skippedCount, total: results.count)
+        if globals.useJson {
+            print(Output.json(batchResult))
+        } else {
+            print("Extracted \(extractedCount) frames, skipped \(skippedCount) (total \(results.count))")
+            for f in results where !f.skipped {
+                var line = "  \(String(format: "%.1f", f.timestamp))s → \(f.path)"
+                if let w = f.width, let h = f.height { line += " (\(w)×\(h))" }
+                print(line)
             }
         }
     }
@@ -2691,12 +3043,17 @@ func allSchemas() -> [CommandSchema] { return [
             .init(name: "--duration", type: "number", defaultValue: "0.3"),
             .init(name: "--json", type: "bool", defaultValue: "false")
         ], exitCodes: ["0": "success", "2": "error"]),
-    CommandSchema(name: "record", description: "Screen video recording (start/stop/frame/status). Frame lookback (--at past timestamp) only works after stop; during recording, frame returns live screenshot. Workflow: record stop returns videoPath → pass it to record frame --video <path> --at <seconds>.",
+    CommandSchema(name: "record", description: "Screen video recording (start/stop/frame/frames/status). Workflow: record stop → get videoPath → record frame --video <path> --at <seconds>. Use record frames for batch extraction with --every or --at timestamps.",
         args: [],
         flags: [
             .init(name: "--at", type: "number", defaultValue: nil),
             .init(name: "--video", type: "string", defaultValue: nil),
             .init(name: "--output", type: "string", defaultValue: nil),
+            .init(name: "--max-width", type: "int", defaultValue: nil),
+            .init(name: "--crop", type: "string", defaultValue: nil),
+            .init(name: "--dedup-threshold", type: "number", defaultValue: nil),
+            .init(name: "--every", type: "number", defaultValue: nil),
+            .init(name: "--output-dir", type: "string", defaultValue: nil),
             .init(name: "--json", type: "bool", defaultValue: "false")
         ], exitCodes: ["0": "success", "2": "error"]),
     CommandSchema(name: "schema", description: "Show command schema",
