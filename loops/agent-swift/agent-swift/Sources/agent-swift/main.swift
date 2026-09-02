@@ -2,13 +2,14 @@ import ArgumentParser
 import ApplicationServices
 import Foundation
 import AppKit
+import Vision
 import AgentSwiftLib
 
 struct AgentSwift: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "agent-swift",
         abstract: "CLI for AI agents to control macOS apps via Accessibility API",
-        version: "0.9.0",
+        version: "0.10.0",
         subcommands: [
             DoctorCommand.self,
             ConnectCommand.self,
@@ -2370,6 +2371,10 @@ struct RecordFrameCommand: ParsableCommand {
               --max-width <pixels>  Downscale to fit width (preserves aspect ratio, no upscale)
               --crop <x,y,w,h>      Crop to region (clamped to valid area)
               --dedup-threshold <0-1> Skip if similar to last extracted frame
+              --grayscale           Convert to grayscale (3x smaller file)
+              --format <png|jpeg>   Output format (default: png)
+              --quality <1-100>     JPEG quality (default: 80, only with --format jpeg)
+              --ocr                 Extract text via Vision OCR instead of returning image
             """
     )
 
@@ -2393,6 +2398,27 @@ struct RecordFrameCommand: ParsableCommand {
     @Option(name: .long, help: "Skip if similarity to last frame >= threshold (0.0-1.0)")
     var dedupThreshold: Double?
 
+    @Flag(name: .long, help: "Convert to grayscale (reduces file size ~3x)")
+    var grayscale: Bool = false
+
+    @Option(name: .long, help: "Output format: png (default) or jpeg")
+    var format: String?
+
+    @Option(name: .long, help: "JPEG quality 1-100 (default: 80, only with --format jpeg)")
+    var quality: Int?
+
+    @Flag(name: .long, help: "Extract text via Vision OCR (returns texts array instead of image)")
+    var ocr: Bool = false
+
+    struct OcrTextBlock: Codable {
+        let text: String
+        let x: Int
+        let y: Int
+        let width: Int
+        let height: Int
+        let confidence: Double
+    }
+
     struct FrameResult: Codable {
         let path: String
         let timestamp: Double
@@ -2403,6 +2429,7 @@ struct RecordFrameCommand: ParsableCommand {
         let skipped: Bool?
         let reason: String?
         let similarity: Double?
+        let texts: [OcrTextBlock]?
     }
 
     func run() throws {
@@ -2428,6 +2455,27 @@ struct RecordFrameCommand: ParsableCommand {
             guard parts.count == 4, parts.allSatisfy({ Int($0) != nil }) else {
                 Output.printError(code: "INVALID_ARGS", message: "crop format must be x,y,width,height (integers)",
                                 hint: "Example: --crop 0,200,1206,800", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+        }
+
+        if let fmt = format {
+            guard fmt == "png" || fmt == "jpeg" else {
+                Output.printError(code: "INVALID_ARGS", message: "format must be 'png' or 'jpeg'",
+                                hint: "Example: --format jpeg --quality 60", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+        }
+
+        if let q = quality {
+            guard q >= 1 && q <= 100 else {
+                Output.printError(code: "INVALID_ARGS", message: "quality must be between 1 and 100",
+                                hint: "Example: --quality 80", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            guard format == "jpeg" else {
+                Output.printError(code: "INVALID_ARGS", message: "--quality requires --format jpeg",
+                                hint: "Example: --format jpeg --quality 60", useJson: globals.useJson)
                 throw ExitCode(2)
             }
         }
@@ -2479,19 +2527,30 @@ struct RecordFrameCommand: ParsableCommand {
             try Self.applyCrop(to: outputPath, cropStr: cropStr)
         }
 
+        // Apply grayscale
+        if grayscale {
+            Self.applyGrayscale(to: outputPath)
+        }
+
         // Apply resize
         if let maxW = maxWidth {
             Self.applyResize(to: outputPath, maxWidth: maxW)
         }
 
+        // Apply format conversion
+        var finalPath = outputPath
+        if format == "jpeg" {
+            finalPath = Self.convertToJpeg(path: outputPath, quality: quality ?? 80)
+        }
+
         // Dedup check
         if let threshold = dedupThreshold, let lastFrame = session.lastFramePath,
            FileManager.default.fileExists(atPath: lastFrame) {
-            let similarity = Self.computeSimilarity(file1: lastFrame, file2: outputPath)
+            let similarity = Self.computeSimilarity(file1: lastFrame, file2: finalPath)
             if similarity >= threshold {
-                try FileManager.default.removeItem(atPath: outputPath)
-                let result = FrameResult(path: outputPath, timestamp: at, source: "video", success: true,
-                                        width: nil, height: nil, skipped: true, reason: "duplicate", similarity: similarity)
+                try? FileManager.default.removeItem(atPath: finalPath)
+                let result = FrameResult(path: finalPath, timestamp: at, source: "video", success: true,
+                                        width: nil, height: nil, skipped: true, reason: "duplicate", similarity: similarity, texts: nil)
                 if globals.useJson {
                     print(Output.json(result))
                 } else {
@@ -2501,20 +2560,24 @@ struct RecordFrameCommand: ParsableCommand {
             }
         }
 
+        // OCR
+        let ocrTexts: [OcrTextBlock]? = ocr ? Self.performOCR(imagePath: finalPath) : nil
+
         // Get dimensions
-        let dims = Self.getImageDimensions(path: outputPath)
+        let dims = Self.getImageDimensions(path: finalPath)
 
         // Update lastFramePath
-        session.lastFramePath = outputPath
+        session.lastFramePath = finalPath
         try store.save(session)
 
-        let result = FrameResult(path: outputPath, timestamp: at, source: "video", success: true,
-                                width: dims?.0, height: dims?.1, skipped: false, reason: nil, similarity: nil)
+        let result = FrameResult(path: finalPath, timestamp: at, source: "video", success: true,
+                                width: dims?.0, height: dims?.1, skipped: false, reason: nil, similarity: nil, texts: ocrTexts)
         if globals.useJson {
             print(Output.json(result))
         } else {
-            var msg = "Frame extracted at \(at)s → \(outputPath)"
+            var msg = "Frame extracted at \(at)s → \(finalPath)"
             if let (w, h) = dims { msg += " (\(w)×\(h))" }
+            if let texts = ocrTexts { msg += " [\(texts.count) text blocks]" }
             print(msg)
         }
     }
@@ -2552,21 +2615,31 @@ struct RecordFrameCommand: ParsableCommand {
         if let cropStr = crop {
             try Self.applyCrop(to: screenshotPath, cropStr: cropStr)
         }
+        if grayscale {
+            Self.applyGrayscale(to: screenshotPath)
+        }
         if let maxW = maxWidth {
             Self.applyResize(to: screenshotPath, maxWidth: maxW)
         }
+        var liveFinalPath = screenshotPath
+        if format == "jpeg" {
+            liveFinalPath = Self.convertToJpeg(path: screenshotPath, quality: quality ?? 80)
+        }
 
-        let dims = Self.getImageDimensions(path: screenshotPath)
+        let ocrTexts: [OcrTextBlock]? = ocr ? Self.performOCR(imagePath: liveFinalPath) : nil
+        let dims = Self.getImageDimensions(path: liveFinalPath)
         var updatedSession = session
-        updatedSession.lastFramePath = screenshotPath
+        updatedSession.lastFramePath = liveFinalPath
         try store.save(updatedSession)
 
-        let result = FrameResult(path: screenshotPath, timestamp: at, source: "live", success: true,
-                                width: dims?.0, height: dims?.1, skipped: false, reason: nil, similarity: nil)
+        let result = FrameResult(path: liveFinalPath, timestamp: at, source: "live", success: true,
+                                width: dims?.0, height: dims?.1, skipped: false, reason: nil, similarity: nil, texts: ocrTexts)
         if globals.useJson {
             print(Output.json(result))
         } else {
-            print("Live frame captured → \(screenshotPath)")
+            var msg = "Live frame captured → \(liveFinalPath)"
+            if let texts = ocrTexts { msg += " [\(texts.count) text blocks]" }
+            print(msg)
         }
     }
 
@@ -2721,6 +2794,77 @@ struct RecordFrameCommand: ParsableCommand {
         return 1.0 - (totalDiff / Double(pixelCount))
     }
 
+    static func performOCR(imagePath: String) -> [OcrTextBlock] {
+        guard let image = NSImage(contentsOfFile: imagePath),
+              let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let cgImage = bitmap.cgImage else {
+            return []
+        }
+
+        let imgWidth = cgImage.width
+        let imgHeight = cgImage.height
+
+        var results: [OcrTextBlock] = []
+        let request = VNRecognizeTextRequest { request, error in
+            guard let observations = request.results as? [VNRecognizedTextObservation] else { return }
+            for observation in observations {
+                guard let candidate = observation.topCandidates(1).first else { continue }
+                let bbox = observation.boundingBox
+                // Vision: normalized (0-1), origin at bottom-left → pixel coords, origin at top-left
+                let x = Int(bbox.origin.x * Double(imgWidth))
+                let y = Int(Double(imgHeight) - (bbox.origin.y + bbox.height) * Double(imgHeight))
+                let w = Int(bbox.width * Double(imgWidth))
+                let h = Int(bbox.height * Double(imgHeight))
+                results.append(OcrTextBlock(
+                    text: candidate.string,
+                    x: x, y: y, width: w, height: h,
+                    confidence: Double(candidate.confidence)
+                ))
+            }
+        }
+        request.recognitionLevel = .accurate
+
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        try? handler.perform([request])
+
+        // Sort top-to-bottom, left-to-right
+        results.sort { ($0.y, $0.x) < ($1.y, $1.x) }
+        return results
+    }
+
+    static func applyGrayscale(to path: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sips")
+        process.arguments = ["--matchTo", "/System/Library/ColorSync/Profiles/Generic Gray Profile.icc", path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        process.waitUntilExit()
+    }
+
+    static func convertToJpeg(path: String, quality: Int) -> String {
+        // Change extension from .png to .jpg
+        let jpegPath: String
+        if path.hasSuffix(".png") {
+            jpegPath = String(path.dropLast(4)) + ".jpg"
+        } else {
+            jpegPath = path + ".jpg"
+        }
+        // Copy then convert (sips modifies in-place)
+        try? FileManager.default.copyItem(atPath: path, toPath: jpegPath)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sips")
+        process.arguments = ["--setProperty", "format", "jpeg", "--setProperty", "formatOptions", String(quality), jpegPath]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        process.waitUntilExit()
+        // Remove original PNG
+        try? FileManager.default.removeItem(atPath: path)
+        return jpegPath
+    }
+
     static func isFfmpegAvailable() -> Bool {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -2811,8 +2955,9 @@ struct RecordFramesCommand: ParsableCommand {
         commandName: "frames",
         abstract: "Extract multiple frames from a video",
         discussion: """
-            Batch frame extraction with optional dedup and resize.
-            Use --every for regular intervals or --at for specific timestamps.
+            Batch frame extraction with optional dedup, resize, and OCR.
+            Use --every for regular intervals, --at for specific timestamps,
+            or --keyframes for automatic scene-change detection.
             """
     )
 
@@ -2827,6 +2972,9 @@ struct RecordFramesCommand: ParsableCommand {
     @Option(name: .long, help: "Specific timestamps (comma-separated, e.g. 1.0,5.0,10.0)")
     var at: String?
 
+    @Flag(name: .long, help: "Auto-detect scene changes (mutually exclusive with --every/--at)")
+    var keyframes: Bool = false
+
     @Option(name: .long, help: "Max width in pixels — downscale to fit (no upscale)")
     var maxWidth: Int?
 
@@ -2836,6 +2984,18 @@ struct RecordFramesCommand: ParsableCommand {
     @Option(name: .long, help: "Output directory (default: session dir)")
     var outputDir: String?
 
+    @Flag(name: .long, help: "Convert to grayscale (reduces file size ~3x)")
+    var grayscale: Bool = false
+
+    @Option(name: .long, help: "Output format: png (default) or jpeg")
+    var format: String?
+
+    @Option(name: .long, help: "JPEG quality 1-100 (default: 80, only with --format jpeg)")
+    var quality: Int?
+
+    @Flag(name: .long, help: "Extract text via Vision OCR for each frame")
+    var ocr: Bool = false
+
     struct BatchFrameEntry: Codable {
         let path: String
         let timestamp: Double
@@ -2843,6 +3003,7 @@ struct RecordFramesCommand: ParsableCommand {
         let width: Int?
         let height: Int?
         let similarity: Double?
+        let texts: [RecordFrameCommand.OcrTextBlock]?
     }
 
     struct BatchResult: Codable {
@@ -2851,6 +3012,7 @@ struct RecordFramesCommand: ParsableCommand {
         let extracted: Int
         let skipped: Int
         let total: Int
+        let totalScanned: Int?
     }
 
     func run() throws {
@@ -2866,11 +3028,43 @@ struct RecordFramesCommand: ParsableCommand {
             throw ExitCode(2)
         }
 
+        if let fmt = format {
+            guard fmt == "png" || fmt == "jpeg" else {
+                Output.printError(code: "INVALID_ARGS", message: "format must be 'png' or 'jpeg'",
+                                hint: "Example: --format jpeg --quality 60", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+        }
+
+        if let q = quality {
+            guard q >= 1 && q <= 100 else {
+                Output.printError(code: "INVALID_ARGS", message: "quality must be between 1 and 100",
+                                hint: "Example: --quality 80", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            guard format == "jpeg" else {
+                Output.printError(code: "INVALID_ARGS", message: "--quality requires --format jpeg",
+                                hint: "Example: --format jpeg --quality 60", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+        }
+
         // Get video duration
         guard let duration = RecordStopCommand.getVideoDuration(path: video) else {
             Output.printError(code: "VIDEO_READ_FAILED", message: "Could not read video duration",
                             hint: "Check if the video file is valid", useJson: globals.useJson)
             throw ExitCode(2)
+        }
+
+        // Keyframes mode vs timestamp mode
+        if keyframes {
+            guard every == nil && at == nil else {
+                Output.printError(code: "INVALID_ARGS", message: "--keyframes is mutually exclusive with --every and --at",
+                                hint: "Use --keyframes alone, or --every/--at without --keyframes", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            try runKeyframeExtraction(duration: duration)
+            return
         }
 
         // Build timestamp list
@@ -2894,8 +3088,8 @@ struct RecordFramesCommand: ParsableCommand {
                 throw ExitCode(2)
             }
         } else {
-            Output.printError(code: "INVALID_ARGS", message: "Specify --every <seconds> or --at <timestamps>",
-                            hint: "Example: --every 2.0 or --at 1.0,5.0,10.0", useJson: globals.useJson)
+            Output.printError(code: "INVALID_ARGS", message: "Specify --every, --at, or --keyframes",
+                            hint: "Example: --every 2.0 or --at 1.0,5.0,10.0 or --keyframes", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
@@ -2914,8 +3108,14 @@ struct RecordFramesCommand: ParsableCommand {
             do {
                 try RecordFrameCommand.extractFrame(from: video, at: ts, to: outputPath, useJson: globals.useJson)
             } catch {
-                // Skip frames that fail (e.g. beyond duration)
                 continue
+            }
+
+            // Apply crop (if crop were supported on batch — currently not, reserved for single frame)
+
+            // Apply grayscale
+            if grayscale {
+                RecordFrameCommand.applyGrayscale(to: outputPath)
             }
 
             // Apply resize
@@ -2923,28 +3123,37 @@ struct RecordFramesCommand: ParsableCommand {
                 RecordFrameCommand.applyResize(to: outputPath, maxWidth: maxW)
             }
 
+            // Apply format conversion
+            var finalPath = outputPath
+            if format == "jpeg" {
+                finalPath = RecordFrameCommand.convertToJpeg(path: outputPath, quality: quality ?? 80)
+            }
+
             // Dedup check
             if let threshold = dedupThreshold, let lastPath = lastExtractedPath,
                FileManager.default.fileExists(atPath: lastPath) {
-                let similarity = RecordFrameCommand.computeSimilarity(file1: lastPath, file2: outputPath)
+                let similarity = RecordFrameCommand.computeSimilarity(file1: lastPath, file2: finalPath)
                 if similarity >= threshold {
-                    try? FileManager.default.removeItem(atPath: outputPath)
-                    results.append(BatchFrameEntry(path: outputPath, timestamp: ts, skipped: true,
-                                                   width: nil, height: nil, similarity: similarity))
+                    try? FileManager.default.removeItem(atPath: finalPath)
+                    results.append(BatchFrameEntry(path: finalPath, timestamp: ts, skipped: true,
+                                                   width: nil, height: nil, similarity: similarity, texts: nil))
                     skippedCount += 1
                     continue
                 }
             }
 
-            let dims = RecordFrameCommand.getImageDimensions(path: outputPath)
-            results.append(BatchFrameEntry(path: outputPath, timestamp: ts, skipped: false,
-                                           width: dims?.0, height: dims?.1, similarity: nil))
-            lastExtractedPath = outputPath
+            // OCR
+            let ocrTexts: [RecordFrameCommand.OcrTextBlock]? = ocr ? RecordFrameCommand.performOCR(imagePath: finalPath) : nil
+
+            let dims = RecordFrameCommand.getImageDimensions(path: finalPath)
+            results.append(BatchFrameEntry(path: finalPath, timestamp: ts, skipped: false,
+                                           width: dims?.0, height: dims?.1, similarity: nil, texts: ocrTexts))
+            lastExtractedPath = finalPath
             extractedCount += 1
         }
 
         let batchResult = BatchResult(video: video, frames: results, extracted: extractedCount,
-                                      skipped: skippedCount, total: results.count)
+                                      skipped: skippedCount, total: results.count, totalScanned: nil)
         if globals.useJson {
             print(Output.json(batchResult))
         } else {
@@ -2952,6 +3161,121 @@ struct RecordFramesCommand: ParsableCommand {
             for f in results where !f.skipped {
                 var line = "  \(String(format: "%.1f", f.timestamp))s → \(f.path)"
                 if let w = f.width, let h = f.height { line += " (\(w)×\(h))" }
+                if let texts = f.texts { line += " [\(texts.count) texts]" }
+                print(line)
+            }
+        }
+    }
+
+    private func runKeyframeExtraction(duration: Double) throws {
+        let scanInterval = 0.5  // Scan every 0.5 seconds
+        let threshold = dedupThreshold ?? 0.92  // Default keyframe threshold
+
+        let outDir = outputDir ?? RecordFrameCommand.resolveSessionDir()
+        try FileManager.default.createDirectory(atPath: outDir, withIntermediateDirectories: true)
+
+        var results: [BatchFrameEntry] = []
+        var lastExtractedPath: String? = nil
+        var extractedCount = 0
+        var skippedCount = 0
+        var totalScanned = 0
+
+        var t = 0.0
+        while t < duration {
+            totalScanned += 1
+            let tmpPath = "\(outDir)/keyframe-scan-\(String(format: "%.1f", t))s.png"
+
+            do {
+                try RecordFrameCommand.extractFrame(from: video, at: t, to: tmpPath, useJson: globals.useJson)
+            } catch {
+                t += scanInterval
+                continue
+            }
+
+            var shouldExtract = false
+
+            if lastExtractedPath == nil {
+                // Always extract first frame
+                shouldExtract = true
+            } else if let lastPath = lastExtractedPath, FileManager.default.fileExists(atPath: lastPath) {
+                let similarity = RecordFrameCommand.computeSimilarity(file1: lastPath, file2: tmpPath)
+                if similarity < threshold {
+                    shouldExtract = true
+                }
+            }
+
+            if shouldExtract {
+                let finalName = "keyframe-\(String(format: "%.1f", t))s.png"
+                let outputPath = "\(outDir)/\(finalName)"
+                if tmpPath != outputPath {
+                    try? FileManager.default.removeItem(atPath: outputPath)
+                    try FileManager.default.moveItem(atPath: tmpPath, toPath: outputPath)
+                }
+
+                // Apply processing
+                if grayscale {
+                    RecordFrameCommand.applyGrayscale(to: outputPath)
+                }
+                if let maxW = maxWidth {
+                    RecordFrameCommand.applyResize(to: outputPath, maxWidth: maxW)
+                }
+                var finalPath = outputPath
+                if format == "jpeg" {
+                    finalPath = RecordFrameCommand.convertToJpeg(path: outputPath, quality: quality ?? 80)
+                }
+
+                let ocrTexts: [RecordFrameCommand.OcrTextBlock]? = ocr ? RecordFrameCommand.performOCR(imagePath: finalPath) : nil
+                let dims = RecordFrameCommand.getImageDimensions(path: finalPath)
+                results.append(BatchFrameEntry(path: finalPath, timestamp: t, skipped: false,
+                                               width: dims?.0, height: dims?.1, similarity: nil, texts: ocrTexts))
+                lastExtractedPath = finalPath
+                extractedCount += 1
+            } else {
+                try? FileManager.default.removeItem(atPath: tmpPath)
+                skippedCount += 1
+            }
+
+            t += scanInterval
+        }
+
+        // Always extract last frame if not already extracted
+        let lastTs = max(0, duration - 0.1)
+        if let lastResult = results.last, lastResult.timestamp < lastTs - scanInterval {
+            let tmpPath = "\(outDir)/keyframe-scan-last.png"
+            do {
+                try RecordFrameCommand.extractFrame(from: video, at: lastTs, to: tmpPath, useJson: globals.useJson)
+                let outputPath = "\(outDir)/keyframe-\(String(format: "%.1f", lastTs))s.png"
+                try? FileManager.default.removeItem(atPath: outputPath)
+                try FileManager.default.moveItem(atPath: tmpPath, toPath: outputPath)
+
+                if grayscale { RecordFrameCommand.applyGrayscale(to: outputPath) }
+                if let maxW = maxWidth { RecordFrameCommand.applyResize(to: outputPath, maxWidth: maxW) }
+                var finalPath = outputPath
+                if format == "jpeg" {
+                    finalPath = RecordFrameCommand.convertToJpeg(path: outputPath, quality: quality ?? 80)
+                }
+
+                let ocrTexts: [RecordFrameCommand.OcrTextBlock]? = ocr ? RecordFrameCommand.performOCR(imagePath: finalPath) : nil
+                let dims = RecordFrameCommand.getImageDimensions(path: finalPath)
+                results.append(BatchFrameEntry(path: finalPath, timestamp: lastTs, skipped: false,
+                                               width: dims?.0, height: dims?.1, similarity: nil, texts: ocrTexts))
+                extractedCount += 1
+                totalScanned += 1
+            } catch {
+                // Last frame extraction failed — not critical
+            }
+        }
+
+        let batchResult = BatchResult(video: video, frames: results, extracted: extractedCount,
+                                      skipped: skippedCount, total: results.count, totalScanned: totalScanned)
+        if globals.useJson {
+            print(Output.json(batchResult))
+        } else {
+            print("Keyframes: extracted \(extractedCount), skipped \(skippedCount) (scanned \(totalScanned) at \(scanInterval)s intervals)")
+            for f in results {
+                var line = "  \(String(format: "%.1f", f.timestamp))s → \(f.path)"
+                if let w = f.width, let h = f.height { line += " (\(w)×\(h))" }
+                if let texts = f.texts { line += " [\(texts.count) texts]" }
                 print(line)
             }
         }
@@ -3043,7 +3367,7 @@ func allSchemas() -> [CommandSchema] { return [
             .init(name: "--duration", type: "number", defaultValue: "0.3"),
             .init(name: "--json", type: "bool", defaultValue: "false")
         ], exitCodes: ["0": "success", "2": "error"]),
-    CommandSchema(name: "record", description: "Screen video recording (start/stop/frame/frames/status). Workflow: record stop → get videoPath → record frame --video <path> --at <seconds>. Use record frames for batch extraction with --every or --at timestamps.",
+    CommandSchema(name: "record", description: "Screen video recording (start/stop/frame/frames/status). Workflow: record stop → get videoPath → record frame --video <path> --at <seconds>. Use record frames for batch extraction with --every, --at, or --keyframes. Token optimization: --ocr for text extraction, --grayscale/--format jpeg for smaller files, --keyframes for scene-change detection.",
         args: [],
         flags: [
             .init(name: "--at", type: "number", defaultValue: nil),
@@ -3052,6 +3376,11 @@ func allSchemas() -> [CommandSchema] { return [
             .init(name: "--max-width", type: "int", defaultValue: nil),
             .init(name: "--crop", type: "string", defaultValue: nil),
             .init(name: "--dedup-threshold", type: "number", defaultValue: nil),
+            .init(name: "--grayscale", type: "bool", defaultValue: "false"),
+            .init(name: "--format", type: "string", defaultValue: "png"),
+            .init(name: "--quality", type: "int", defaultValue: "80"),
+            .init(name: "--ocr", type: "bool", defaultValue: "false"),
+            .init(name: "--keyframes", type: "bool", defaultValue: "false"),
             .init(name: "--every", type: "number", defaultValue: nil),
             .init(name: "--output-dir", type: "string", defaultValue: nil),
             .init(name: "--json", type: "bool", defaultValue: "false")
