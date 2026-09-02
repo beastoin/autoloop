@@ -146,6 +146,9 @@ fi
 if [ -f "loops/agent-swift/program-phase13.md" ]; then
   PHASE=14  # Frame processing: resize, dedup, crop
 fi
+if [ -f "loops/agent-swift/program-phase14.md" ]; then
+  PHASE=15  # Token-efficient video analysis: keyframes, OCR, grayscale, JPEG
+fi
 echo "phase:            $PHASE"
 
 # Step 1: Build check
@@ -1588,9 +1591,9 @@ if [ "$PHASE" -ge 14 ] && [ "$BUILD_STATUS" = "pass" ]; then
     P14_PASS=$((P14_PASS + 1))
   fi
 
-  # 11. version 0.9.x
+  # 11. version 0.9.x or higher
   P14_TOTAL=$((P14_TOTAL + 1))
-  if "$BINARY_PATH" --version 2>&1 | grep -qE "^0\.9\.[0-9]+"; then
+  if "$BINARY_PATH" --version 2>&1 | grep -qE "^0\.(9|[1-9][0-9]+)\.[0-9]+"; then
     P14_PASS=$((P14_PASS + 1))
   fi
 
@@ -1607,6 +1610,102 @@ if [ "$PHASE" -ge 14 ] && [ "$BUILD_STATUS" = "pass" ]; then
   fi
 fi
 echo "p14_frame_proc:   $P14_FRAME_PROC"
+
+# Phase 15 gates: Token-efficient video analysis (keyframes, OCR, grayscale, JPEG)
+P15_TOKEN_OPT="skip"
+if [ "$PHASE" -ge 15 ] && [ "$BUILD_STATUS" = "pass" ]; then
+  P15_PASS=0
+  P15_TOTAL=0
+
+  # 1. record frame --help mentions --ocr
+  P15_TOTAL=$((P15_TOTAL + 1))
+  if "$BINARY_PATH" record frame --help 2>&1 | grep -q "\-\-ocr"; then
+    P15_PASS=$((P15_PASS + 1))
+  fi
+
+  # 2. record frame --help mentions --grayscale
+  P15_TOTAL=$((P15_TOTAL + 1))
+  if "$BINARY_PATH" record frame --help 2>&1 | grep -q "grayscale"; then
+    P15_PASS=$((P15_PASS + 1))
+  fi
+
+  # 3. record frame --help mentions --format
+  P15_TOTAL=$((P15_TOTAL + 1))
+  if "$BINARY_PATH" record frame --help 2>&1 | grep -q "\-\-format"; then
+    P15_PASS=$((P15_PASS + 1))
+  fi
+
+  # 4. record frame --help mentions --quality
+  P15_TOTAL=$((P15_TOTAL + 1))
+  if "$BINARY_PATH" record frame --help 2>&1 | grep -q "\-\-quality"; then
+    P15_PASS=$((P15_PASS + 1))
+  fi
+
+  # 5. record frames --help mentions --keyframes
+  P15_TOTAL=$((P15_TOTAL + 1))
+  if "$BINARY_PATH" record frames --help 2>&1 | grep -q "keyframes"; then
+    P15_PASS=$((P15_PASS + 1))
+  fi
+
+  # 6. Vision framework imported in source (for OCR)
+  P15_TOTAL=$((P15_TOTAL + 1))
+  if grep -rq "import Vision" "$AGENT_SWIFT_DIR/Sources/"; then
+    P15_PASS=$((P15_PASS + 1))
+  fi
+
+  # 7. VNRecognizeTextRequest in source
+  P15_TOTAL=$((P15_TOTAL + 1))
+  if grep -rq "VNRecognizeTextRequest" "$AGENT_SWIFT_DIR/Sources/"; then
+    P15_PASS=$((P15_PASS + 1))
+  fi
+
+  # 8. grayscale/color profile conversion in source
+  P15_TOTAL=$((P15_TOTAL + 1))
+  if grep -rq "grayscale\|Gray Profile\|matchTo" "$AGENT_SWIFT_DIR/Sources/"; then
+    P15_PASS=$((P15_PASS + 1))
+  fi
+
+  # 9. schema mentions ocr or keyframes
+  P15_TOTAL=$((P15_TOTAL + 1))
+  if "$BINARY_PATH" schema 2>&1 | grep -q "ocr\|keyframes"; then
+    P15_PASS=$((P15_PASS + 1))
+  fi
+
+  # 10. TokenOptTests.swift exists
+  P15_TOTAL=$((P15_TOTAL + 1))
+  if [ -f "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/TokenOptTests.swift" ]; then
+    P15_PASS=$((P15_PASS + 1))
+  fi
+
+  # 11. >= 20 assertions in TokenOptTests
+  P15_TOTAL=$((P15_TOTAL + 1))
+  TO_ASSERTS=0
+  if [ -f "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/TokenOptTests.swift" ]; then
+    TO_ASSERTS=$(grep -c "XCTAssert" "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/TokenOptTests.swift" 2>/dev/null || echo 0)
+  fi
+  if [ "$TO_ASSERTS" -ge 20 ]; then
+    P15_PASS=$((P15_PASS + 1))
+  fi
+
+  # 12. version 0.10.x or higher
+  P15_TOTAL=$((P15_TOTAL + 1))
+  if "$BINARY_PATH" --version 2>&1 | grep -qE "^0\.(1[0-9]+|[2-9][0-9]+)\.[0-9]+|^[1-9]+\.[0-9]+\.[0-9]+"; then
+    P15_PASS=$((P15_PASS + 1))
+  fi
+
+  # 13. total tests >= 220
+  P15_TOTAL=$((P15_TOTAL + 1))
+  if [ "$TEST_COUNT" -ge 220 ]; then
+    P15_PASS=$((P15_PASS + 1))
+  fi
+
+  if [ "$P15_PASS" -eq "$P15_TOTAL" ]; then
+    P15_TOKEN_OPT="pass"
+  else
+    P15_TOKEN_OPT="fail ($P15_PASS/$P15_TOTAL)"
+  fi
+fi
+echo "p15_token_opt:    $P15_TOKEN_OPT"
 
 # Step 5: E2E test (optional; enabled when e2e-test.sh exists)
 E2E_STATUS="skip"
@@ -1802,6 +1901,26 @@ if [ "$BUILD_STATUS" = "pass" ] && [ "$TEST_STATUS" = "pass" ] && [ "$CONTRACT_S
          [ "$P12_USER_UX" = "pass" ] && \
          [ "$P13_RECORDING" = "pass" ] && \
          [ "$P14_FRAME_PROC" = "pass" ]; then
+        PHASE_COMPLETE="yes"
+      fi
+      ;;
+    15)
+      if [ "$HELP_STATUS" = "pass" ] && \
+         [ "$JSON_STATUS" = "pass" ] && \
+         [ "$EXIT_STATUS" = "pass" ] && \
+         [ "$P3_INTERACTION" = "pass" ] && \
+         [ "$P4_AUTONOMY" = "pass" ] && \
+         [ "$P5_POLISH" = "pass" ] && \
+         [ "$P2B_WIDGET" = "pass" ] && \
+         [ "$P7_CLICK" = "pass" ] && \
+         [ "$P8_SIMULATOR" = "pass" ] && \
+         [ "$P9_IDB" = "pass" ] && \
+         [ "$P10_MIRROR" = "pass" ] && \
+         [ "$P11_CGEVENT_SIM" = "pass" ] && \
+         [ "$P12_USER_UX" = "pass" ] && \
+         [ "$P13_RECORDING" = "pass" ] && \
+         [ "$P14_FRAME_PROC" = "pass" ] && \
+         [ "$P15_TOKEN_OPT" = "pass" ]; then
         PHASE_COMPLETE="yes"
       fi
       ;;
