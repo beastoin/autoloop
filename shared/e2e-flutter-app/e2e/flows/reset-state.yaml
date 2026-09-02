@@ -1,0 +1,45 @@
+version: 2
+name: reset-state
+description: Increment counter, then reset all state to verify reset functionality
+app: com.example.marionette_test_app
+evidence:
+  video: true
+
+steps:
+  - id: S1
+    name: Setup - increment counter
+    do: Press Increment button 3 times to set counter to a non-zero value
+    claim: Counter is at 3 after three increments
+
+  - id: S2
+    name: Verify non-zero state
+    do: Take screenshot to confirm counter is not zero
+    claim: Counter shows 3 and status reflects last increment
+    judge:
+      - prompt: Is the counter showing a non-zero value (should be 3)?
+        screenshot: step-S2
+        look_for: [Counter: 3, incremented]
+        fail_if: [Counter: 0]
+    evidence:
+      - screenshot: step-S2.webp
+    verify: true
+
+  - id: S3
+    name: Press reset
+    do: Press the Reset button
+    claim: All fields reset to initial values
+    expect:
+      - milestone: counter-reset
+        kind: text_visible
+        values: ["Counter: 0"]
+      - milestone: status-reset
+        kind: text_visible
+        values: ["Reset complete"]
+    judge:
+      - prompt: Has the counter returned to 0 and the status changed to "Reset complete"?
+        screenshot: step-S3
+        look_for: [Counter: 0, Reset complete]
+        fail_if: [Counter: 3, Counter: 1, error]
+    evidence:
+      - screenshot: step-S3.webp
+    verify: true

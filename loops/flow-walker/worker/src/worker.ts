@@ -254,7 +254,7 @@ async function handleGetReport(runId: string, env: Env): Promise<Response> {
   return new Response(object.body, {
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'public, max-age=3600',
+      'Cache-Control': 'public, no-cache',
       ...CORS_HEADERS,
     },
   });
@@ -299,7 +299,7 @@ async function handleGetData(runId: string, env: Env): Promise<Response> {
   return new Response(object.body, {
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'public, max-age=3600',
+      'Cache-Control': 'public, no-cache',
       ...CORS_HEADERS,
     },
   });

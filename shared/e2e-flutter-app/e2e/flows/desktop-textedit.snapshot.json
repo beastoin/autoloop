@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "flow": "desktop-textedit",
+  "flowHash": "190e88b202e8a3cb",
+  "device": {
+    "model": "unknown",
+    "resolution": "unknown"
+  },
+  "createdAt": "2026-03-28T23:21:11.016Z",
+  "runId": "kY-EWQc",
+  "totalDurationMs": 22000,
+  "verifySteps": [
+    "S1",
+    "S2",
+    "S3"
+  ],
+  "steps": {
+    "S1": {
+      "kind": "verify",
+      "waitAfterMs": 200,
+      "durationMs": 2000
+    },
+    "S2": {
+      "kind": "verify",
+      "waitAfterMs": 200,
+      "durationMs": 12000
+    },
+    "S3": {
+      "kind": "verify",
+      "waitAfterMs": 500,
+      "durationMs": 8000
+    }
+  }
+}

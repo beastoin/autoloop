@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "flow": "reset-state",
+  "flowHash": "135885bf3518ade0",
+  "device": {
+    "model": "unknown",
+    "resolution": "unknown"
+  },
+  "createdAt": "2026-03-28T23:18:55.144Z",
+  "runId": "eikmoaw",
+  "totalDurationMs": 3000,
+  "verifySteps": [
+    "S1",
+    "S2",
+    "S3"
+  ],
+  "steps": {
+    "S1": {
+      "kind": "verify",
+      "waitAfterMs": 1000,
+      "durationMs": 1000
+    },
+    "S2": {
+      "kind": "verify",
+      "waitAfterMs": 200,
+      "durationMs": 0
+    },
+    "S3": {
+      "kind": "verify",
+      "waitAfterMs": 500,
+      "durationMs": 1000
+    }
+  }
+}

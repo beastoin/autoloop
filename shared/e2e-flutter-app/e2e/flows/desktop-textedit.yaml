@@ -1,0 +1,44 @@
+version: 2
+name: desktop-textedit
+description: Open TextEdit, type text, verify content via agent-swift on macOS
+app: com.apple.TextEdit
+evidence:
+  video: true
+
+steps:
+  - id: S1
+    name: Connect and verify TextEdit
+    do: Connect to TextEdit and take screenshot of the app window
+    claim: TextEdit app is open and accessible via agent-swift
+    judge:
+      - prompt: Does the screenshot show a TextEdit window on macOS?
+        screenshot: step-S1
+        look_for: [TextEdit window, text area, menu bar]
+        fail_if: [error dialog, crash, blank screen]
+    evidence:
+      - screenshot: step-S1.webp
+    verify: true
+
+  - id: S2
+    name: Snapshot elements
+    do: Capture interactive elements from the TextEdit window
+    claim: Agent-swift detects interactive elements including text area
+    expect:
+      - milestone: elements-found
+        kind: interactive_count
+        min: 2
+    evidence:
+      - screenshot: step-S2.webp
+
+  - id: S3
+    name: Verify UI accessible
+    do: Take final screenshot confirming agent-swift controls TextEdit
+    claim: TextEdit fully accessible via agent-swift Accessibility API
+    judge:
+      - prompt: Does the screenshot confirm TextEdit is running and controllable?
+        screenshot: step-S3
+        look_for: [TextEdit, text content area]
+        fail_if: [permission denied, TCC error]
+    evidence:
+      - screenshot: step-S3.webp
+    verify: true

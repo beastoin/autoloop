@@ -24,3 +24,5 @@ xcuserdata/
 *.app
 *.xctestrun
 *.xcarchive
+.wrangler/
+runs/

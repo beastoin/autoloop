@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "flow": "form-fill-submit",
+  "flowHash": "ed52bae15040e0d1",
+  "device": {
+    "model": "unknown",
+    "resolution": "unknown"
+  },
+  "createdAt": "2026-03-28T23:18:46.278Z",
+  "runId": "_70oBvU",
+  "totalDurationMs": 5000,
+  "verifySteps": [
+    "S1",
+    "S2",
+    "S3",
+    "S4"
+  ],
+  "steps": {
+    "S1": {
+      "kind": "verify",
+      "waitAfterMs": 200,
+      "durationMs": 0
+    },
+    "S2": {
+      "kind": "verify",
+      "waitAfterMs": 200,
+      "durationMs": 2000
+    },
+    "S3": {
+      "kind": "verify",
+      "waitAfterMs": 200,
+      "durationMs": 1000
+    },
+    "S4": {
+      "kind": "verify",
+      "waitAfterMs": 500,
+      "durationMs": 2000
+    }
+  }
+}

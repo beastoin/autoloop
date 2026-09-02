@@ -1,0 +1,67 @@
+version: 2
+name: counter-increment
+description: Verify counter increment and status update on marionette test app
+app: com.example.marionette_test_app
+evidence:
+  video: true
+
+steps:
+  - id: S1
+    name: Verify initial state
+    do: Take screenshot of the home screen and verify initial state
+    claim: App shows counter at 0 and status Ready
+    expect:
+      - milestone: counter-zero
+        kind: text_visible
+        values: ["Counter: 0"]
+      - milestone: status-ready
+        kind: text_visible
+        values: ["Status: Ready"]
+    judge:
+      - prompt: Does the screenshot show a Flutter app with "Counter: 0" and "Status: Ready" text?
+        screenshot: step-S1
+        look_for: [Counter: 0, Status: Ready, Increment button]
+        fail_if: [error dialog, crash screen, blank screen]
+    evidence:
+      - screenshot: step-S1.webp
+    verify: true
+
+  - id: S2
+    name: Tap increment
+    do: Press the Increment button
+    claim: Counter increments to 1 and status updates
+    expect:
+      - milestone: counter-incremented
+        kind: text_visible
+        values: ["Counter: 1"]
+    judge:
+      - prompt: Does the counter now show 1 and the status say "Counter incremented to 1"?
+        screenshot: step-S2
+        look_for: [Counter: 1, incremented]
+        fail_if: [Counter: 0, error]
+    evidence:
+      - screenshot: step-S2.webp
+
+  - id: S3
+    name: Tap increment again
+    do: Press the Increment button a second time
+    claim: Counter increments to 2
+    expect:
+      - milestone: counter-two
+        kind: text_visible
+        values: ["Counter: 2"]
+    evidence:
+      - screenshot: step-S3.webp
+
+  - id: S4
+    name: Verify final state
+    do: Take screenshot to verify counter is at 2
+    claim: Counter is at 2 with correct status message
+    judge:
+      - prompt: Is the counter at 2 and does the status reflect the latest increment?
+        screenshot: step-S4
+        look_for: [Counter: 2, Status:]
+        fail_if: [Counter: 0, Counter: 1, crash]
+    evidence:
+      - screenshot: step-S4.webp
+    verify: true
