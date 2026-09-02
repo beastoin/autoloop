@@ -7,7 +7,7 @@ Practical guide for Claude Code instances working in `beastoin/autoloop`.
 Every CLI built in autoloop follows these references:
 
 1. **Immutable eval + keep/revert loop** ([Karpathy: autoresearch](https://github.com/karpathy/autoresearch)) — program defines objective, eval.sh is the gate, code is the only mutable part. Never modify eval during an active loop.
-2. **Snapshot → @ref → action** ([agent-device](https://github.com/callstackincubator/agent-device), [agent-browser](https://github.com/vercel-labs/agent-browser)) — all interaction follows: take snapshot, get refs, act by ref. This is the UX contract for agent-flutter, agent-swift, and flow-walker.
+2. **Snapshot → @ref → action** ([agent-device](https://github.com/callstackincubator/agent-device), [agent-browser](https://github.com/vercel-labs/agent-browser)) — all interaction follows: take snapshot, get refs, act by ref. This is the UX contract for agent-flutter, agent-swift, and agent-flow.
 3. **Agent-friendly CLI design** ([Justin Poehnelt](https://justin.poehnelt.com/posts/rewrite-your-cli-for-ai-agents/)) — every command must have: schema discovery (`schema` command), input validation, deterministic output, structured errors with codes + hints, JSON mode, defense-in-depth.
 
 These are non-negotiable. When adding commands or features, check: does it have schema? Is output deterministic? Is input validated? Does it follow snapshot → @ref → action?
@@ -24,7 +24,7 @@ These are non-negotiable. When adding commands or features, check: does it have 
 |------|------|-------------|
 | agent-flutter | `loops/agent-flutter/` | `loops/agent-flutter/agent-flutter/` |
 | agent-swift | `loops/agent-swift/` | `loops/agent-swift/agent-swift/` |
-| flow-walker | `loops/flow-walker/` | `loops/flow-walker/flow-walker/` |
+| agent-flow | `loops/agent-flow/` | `loops/agent-flow/agent-flow/` |
 
 ## Autoloop model
 
