@@ -165,6 +165,20 @@ export class AdbTransport implements DeviceTransport {
     return true;
   }
 
+  isKeyboardShowing(): boolean {
+    try {
+      const output = this.exec('shell dumpsys input_method');
+      return output.includes('mInputShown=true');
+    } catch {
+      return false;
+    }
+  }
+
+  dismissKeyboard(): void {
+    // KEYCODE_ESCAPE (111) dismisses keyboard without navigating
+    this.exec('shell input keyevent 111');
+  }
+
   checkToolInstalled(): ToolCheck {
     try {
       execSync('adb version', { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' });

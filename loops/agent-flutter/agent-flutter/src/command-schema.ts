@@ -210,6 +210,14 @@ export const COMMAND_SCHEMAS: CommandSchema[] = [
     examples: ['agent-flutter dismiss', 'agent-flutter dismiss --check'],
   },
   {
+    name: 'dismiss-keyboard',
+    description: 'Dismiss soft keyboard without navigating',
+    args: [],
+    flags: [],
+    exitCodes: { '0': 'success', '2': 'error' },
+    examples: ['agent-flutter dismiss-keyboard'],
+  },
+  {
     name: 'doctor',
     description: 'Check prerequisites: platform tools, device, Flutter app, Marionette, session',
     args: [],

@@ -260,6 +260,9 @@ async function main(): Promise<void> {
       case 'dismiss':
         await (await import('./commands/dismiss.ts')).dismissCommand(cmdArgs);
         break;
+      case 'dismiss-keyboard':
+        await (await import('./commands/dismiss-keyboard.ts')).dismissKeyboardCommand(cmdArgs);
+        break;
       case 'text':
         await (await import('./commands/text.ts')).textCommand(cmdArgs);
         break;

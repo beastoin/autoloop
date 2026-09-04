@@ -258,6 +258,16 @@ return "none"'`, { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pip
     return { present: false, window: 'n/a (iOS)' };
   }
 
+  isKeyboardShowing(): boolean {
+    // iOS simulator keyboard detection would require accessibility inspection.
+    // Not implemented — iOS is secondary platform for agent-flutter.
+    return false;
+  }
+
+  dismissKeyboard(): void {
+    // No-op on iOS simulator
+  }
+
   dismissDialog(): boolean {
     // Try to dismiss iOS system alerts by clicking the "Allow" or "OK" button
     // via accessibility, or fall back to tapping common button positions.

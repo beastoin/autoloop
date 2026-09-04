@@ -52,6 +52,10 @@ export interface DeviceTransport {
   detectDialog(): DialogInfo;
   dismissDialog(): boolean;
 
+  // Keyboard handling
+  isKeyboardShowing(): boolean;
+  dismissKeyboard(): void;
+
   // Doctor checks
   checkToolInstalled(): ToolCheck;
   listDevices(): string[];
