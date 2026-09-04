@@ -1262,7 +1262,12 @@ struct ScreenshotCommand: ParsableCommand {
         if session.isSimulatorMode, let udid = session.simulatorUDID {
             let bridge = SimulatorBridge(udid: udid)
             do {
-                try bridge.screenshot(to: outputPath)
+                // Use recording-safe screenshot when recording is active to avoid killing simctl recordVideo
+                if session.recording != nil {
+                    try bridge.screenshotDuringRecording(to: outputPath)
+                } else {
+                    try bridge.screenshot(to: outputPath)
+                }
                 if globals.useJson {
                     print(Output.json(ScreenshotResult(path: outputPath, success: true, mode: "simulator")))
                 } else {
