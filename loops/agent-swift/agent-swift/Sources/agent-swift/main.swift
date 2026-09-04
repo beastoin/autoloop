@@ -103,7 +103,16 @@ struct DoctorCommand: ParsableCommand {
 
         let session = SessionStore().load()
 
-        if session.isMirrorMode {
+        if session.isVphoneMode {
+            let socketPath = session.vphoneSocket ?? VphoneBridge.defaultSocketPath(for: session.vphoneVM ?? "unknown")
+            let socketExists = FileManager.default.fileExists(atPath: socketPath)
+            checks.append(Check(
+                name: "vphone_socket",
+                status: socketExists ? "pass" : "fail",
+                message: socketExists ? "vphone socket found: \(session.vphoneVM ?? "unknown")" : "vphone socket not found: \(socketPath)",
+                fix: socketExists ? nil : "Check VM is running: ls ~/.vphone/VMs/*/vphone.sock"
+            ))
+        } else if session.isMirrorMode {
             let mirrorRunning = MirrorBridge.isRunning()
             checks.append(Check(
                 name: "iphone_mirroring",
@@ -180,7 +189,7 @@ struct DoctorCommand: ParsableCommand {
 // MARK: - Connect
 
 struct ConnectCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "connect", abstract: "Connect to a macOS app or iOS Simulator")
+    static let configuration = CommandConfiguration(commandName: "connect", abstract: "Connect to a macOS app, iOS Simulator, or vphone VM")
 
     @OptionGroup var globals: GlobalOptions
 
@@ -202,6 +211,9 @@ struct ConnectCommand: ParsableCommand {
     @Flag(name: .long, help: "Connect via iPhone Mirroring (real device)")
     var mirror = false
 
+    @Option(name: .long, help: "Connect to vphone iOS VM (VM name, or 'auto' for auto-detect)")
+    var vphone: String?
+
     struct ConnectResult: Codable {
         let connected: Bool
         let pid: Int?
@@ -218,6 +230,11 @@ struct ConnectCommand: ParsableCommand {
 
         if mirror {
             try connectMirror(store: store, now: now)
+            return
+        }
+
+        if let vmName = vphone {
+            try connectVphone(store: store, now: now, vmName: vmName)
             return
         }
 
@@ -252,8 +269,8 @@ struct ConnectCommand: ParsableCommand {
             resolvedPid = p
             resolvedBundleId = bid
         } else {
-            Output.printError(code: "INVALID_ARGS", message: "Must specify --pid, --bundle-id, or --sim",
-                            hint: "Example: agent-swift connect --bundle-id com.apple.TextEdit\n  or:     agent-swift connect --sim", useJson: globals.useJson)
+            Output.printError(code: "INVALID_ARGS", message: "Must specify --pid, --bundle-id, --sim, or --vphone",
+                            hint: "Example: agent-swift connect --bundle-id com.apple.TextEdit\n  or:     agent-swift connect --sim\n  or:     agent-swift connect --vphone <name>", useJson: globals.useJson)
             throw ExitCode(2)
         }
 
@@ -362,6 +379,44 @@ struct ConnectCommand: ParsableCommand {
             print("Connected via iPhone Mirroring")
         }
     }
+
+    private func connectVphone(store: SessionStore, now: String, vmName: String) throws {
+        let bridge: VphoneBridge
+        do {
+            if vmName == "auto" {
+                bridge = try VphoneBridge.autoDetect()
+            } else {
+                bridge = VphoneBridge(vmName: vmName)
+            }
+        } catch let error as VphoneError {
+            Output.printError(code: error.code, message: error.description,
+                            hint: error.hint, useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        guard bridge.isAvailable() else {
+            Output.printError(code: "VPHONE_SOCKET_NOT_FOUND", message: "vphone socket not found: \(bridge.socketPath)",
+                            hint: "Check VM is running: ls ~/.vphone/VMs/*/vphone.sock", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        var session = SessionData.empty
+        session.connectedAt = now
+        session.vphoneVM = bridge.vmName
+        session.vphoneSocket = bridge.socketPath
+
+        try store.save(session)
+
+        let result = ConnectResult(connected: true, pid: nil, bundleId: nil,
+                                   connectedAt: now, mode: "vphone",
+                                   simulatorUDID: nil, simulatorDeviceType: nil)
+
+        if globals.useJson {
+            print(Output.json(result))
+        } else {
+            print("Connected to vphone VM: \(bridge.vmName)")
+        }
+    }
 }
 
 // MARK: - Disconnect
@@ -402,7 +457,7 @@ struct StatusCommand: ParsableCommand {
 
     func run() throws {
         let session = SessionStore().load()
-        let mode: String? = session.isConnected ? (session.isMirrorMode ? "mirror" : session.isSimulatorMode ? "simulator" : "desktop") : nil
+        let mode: String? = session.isConnected ? (session.isVphoneMode ? "vphone" : session.isMirrorMode ? "mirror" : session.isSimulatorMode ? "simulator" : "desktop") : nil
         let result = StatusResult(
             connected: session.isConnected,
             pid: session.pid,
@@ -418,7 +473,12 @@ struct StatusCommand: ParsableCommand {
             print(Output.json(result))
         } else {
             if session.isConnected {
-                if session.isMirrorMode {
+                if session.isVphoneMode {
+                    print("Connected to vphone VM: \(session.vphoneVM ?? "unknown")")
+                    if let socket = session.vphoneSocket {
+                        print("Socket: \(socket)")
+                    }
+                } else if session.isMirrorMode {
                     print("Connected via iPhone Mirroring")
                 } else if session.isSimulatorMode {
                     print("Connected to Simulator: \(session.simulatorDeviceType ?? session.simulatorUDID ?? "unknown")")
@@ -456,6 +516,11 @@ struct SnapshotCommand: ParsableCommand {
             Output.printError(code: "NOT_CONNECTED", message: "No active session",
                             hint: "Run: agent-swift connect --bundle-id <id>", useJson: globals.useJson)
             throw ExitCode(2)
+        }
+
+        if session.isVphoneMode {
+            try snapshotVphone(store: store, session: &session)
+            return
         }
 
         if session.isSimulatorMode, let udid = session.simulatorUDID {
@@ -539,6 +604,50 @@ struct SnapshotCommand: ParsableCommand {
             print(SnapshotFormatter.formatHuman(elements: elements))
         }
     }
+
+    private func snapshotVphone(store: SessionStore, session: inout SessionData) throws {
+        guard let vmName = session.vphoneVM else {
+            Output.printError(code: "NOT_CONNECTED", message: "No vphone VM in session",
+                            hint: "Run: agent-swift connect --vphone <name>", useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        let bridge = VphoneBridge(vmName: vmName, socketPath: session.vphoneSocket)
+
+        // Take screenshot as the snapshot evidence
+        let screenshotPath = "/tmp/agent-swift-vphone-snapshot.png"
+        do {
+            try bridge.screenshot(to: screenshotPath)
+        } catch let error as VphoneError {
+            Output.printError(code: error.code, message: error.description,
+                            hint: error.hint, useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+
+        // vphone has no AX tree — create a single screen-level ref
+        let screenNode = AXNode(
+            role: "AXScreen", subrole: nil, title: "vphone screen", axDescription: nil, value: nil,
+            identifier: "vphone-screen", childStaticText: nil, enabled: true, focused: true,
+            position: CGPoint(x: 0, y: 0),
+            size: CGSize(width: VphoneBridge.screenWidth, height: VphoneBridge.screenHeight),
+            actions: ["AXPress"], children: [])
+
+        let elements: [(ref: String, node: AXNode)] = [("e0", screenNode)]
+        let refs: [String: SessionData.RefEntry] = ["e0": screenNode.toRefEntry()]
+
+        session.refs = refs
+        session.lastSnapshotAt = ISO8601DateFormatter().string(from: Date())
+        session.interactiveSnapshot = interactive
+        try store.save(session)
+
+        if globals.useJson {
+            print(SnapshotFormatter.formatJson(elements: elements))
+        } else {
+            print("Screenshot: \(screenshotPath)")
+            print(SnapshotFormatter.formatHuman(elements: elements))
+            print("Note: vphone has no AX tree. Use click x y for coordinate-based interaction.")
+        }
+    }
 }
 
 // MARK: - Press
@@ -571,6 +680,29 @@ struct PressCommand: ParsableCommand {
             Output.printError(code: "ELEMENT_NOT_FOUND", message: "Element not found: \(ref)",
                             hint: "Re-run: agent-swift snapshot -i", useJson: globals.useJson)
             throw ExitCode(2)
+        }
+
+        if session.isVphoneMode {
+            guard let bounds = refEntry.bounds else {
+                Output.printError(code: "NO_BOUNDS", message: "Element \(ref) has no position",
+                                hint: "Re-run: agent-swift snapshot -i", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            let center = CGPoint(x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2)
+            let bridge = VphoneBridge(vmName: session.vphoneVM ?? "unknown", socketPath: session.vphoneSocket)
+            do {
+                try bridge.tap(x: center.x, y: center.y)
+                if globals.useJson {
+                    print(Output.json(PressResult(pressed: ref, success: true)))
+                } else {
+                    print("Pressed \(ref)")
+                }
+            } catch let error as VphoneError {
+                Output.printError(code: error.code, message: error.description,
+                                hint: error.hint, useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            return
         }
 
         if session.isSimulatorMode, let udid = session.simulatorUDID {
@@ -1242,6 +1374,23 @@ struct ScreenshotCommand: ParsableCommand {
 
         let outputPath = path ?? "/tmp/agent-swift-screenshot.png"
 
+        if session.isVphoneMode {
+            let bridge = VphoneBridge(vmName: session.vphoneVM ?? "unknown", socketPath: session.vphoneSocket)
+            do {
+                try bridge.screenshot(to: outputPath)
+                if globals.useJson {
+                    print(Output.json(ScreenshotResult(path: outputPath, success: true, mode: "vphone")))
+                } else {
+                    print("Screenshot saved to \(outputPath)")
+                }
+            } catch let error as VphoneError {
+                Output.printError(code: error.code, message: error.description,
+                                hint: error.hint, useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            return
+        }
+
         if session.isMirrorMode {
             let mirror = MirrorBridge()
             do {
@@ -1692,6 +1841,11 @@ struct ClickCommand: ParsableCommand {
             throw ExitCode(2)
         }
 
+        if session.isVphoneMode {
+            try clickVphone(session: session)
+            return
+        }
+
         if session.isMirrorMode {
             try clickMirror()
             return
@@ -1826,6 +1980,57 @@ struct ClickCommand: ParsableCommand {
                 print("Tapped iOS (\(Int(tapX)), \(Int(tapY))) → screen (\(Int(screenPoint.x)), \(Int(screenPoint.y)))")
             }
         } catch let error as SimulatorError {
+            Output.printError(code: error.code, message: error.description,
+                            hint: error.hint, useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+    }
+
+    private func clickVphone(session: SessionData) throws {
+        let tapX: Double
+        let tapY: Double
+        let clickLabel: String
+
+        if target.hasPrefix("@") || target.hasPrefix("e") {
+            let refKey = target.hasPrefix("@") ? String(target.dropFirst()) : target
+            guard let refEntry = session.refs[refKey] else {
+                Output.printError(code: "ELEMENT_NOT_FOUND", message: "Element not found: \(target)",
+                                hint: "Re-run: agent-swift snapshot -i", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            guard let bounds = refEntry.bounds else {
+                Output.printError(code: "NO_BOUNDS", message: "Element \(target) has no position",
+                                hint: "Re-run: agent-swift snapshot -i", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            tapX = bounds.x + bounds.width / 2
+            tapY = bounds.y + bounds.height / 2
+            clickLabel = target.hasPrefix("@") ? target : "@\(target)"
+        } else {
+            guard let x = Double(target), let yCoord = y else {
+                Output.printError(code: "INVALID_INPUT", message: "Invalid click target: \(target)",
+                                hint: "Use @eN for element ref or 'x y' for coordinates", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
+            tapX = x
+            tapY = yCoord
+            clickLabel = "\(Int(x)),\(Int(yCoord))"
+        }
+
+        let bridge = VphoneBridge(vmName: session.vphoneVM ?? "unknown", socketPath: session.vphoneSocket)
+        do {
+            try bridge.tap(x: tapX, y: tapY)
+            if globals.useJson {
+                print(Output.json(ClickResult(
+                    clicked: clickLabel, x: tapX, y: tapY, success: true,
+                    mode: "vphone",
+                    iosPoint: ["x": tapX, "y": tapY],
+                    screenPoint: nil
+                )))
+            } else {
+                print("Tapped vphone (\(Int(tapX)), \(Int(tapY)))")
+            }
+        } catch let error as VphoneError {
             Output.printError(code: error.code, message: error.description,
                             hint: error.hint, useJson: globals.useJson)
             throw ExitCode(2)
@@ -2022,6 +2227,11 @@ struct SwipeCommand: ParsableCommand {
             throw ExitCode(2)
         }
 
+        if session.isVphoneMode {
+            try swipeVphone(session: session)
+            return
+        }
+
         if session.isSimulatorMode, let udid = session.simulatorUDID {
             try swipeSimulator(udid: udid)
             return
@@ -2064,6 +2274,23 @@ struct SwipeCommand: ParsableCommand {
                 print("Swiped from (\(Int(fromX)), \(Int(fromY))) to (\(Int(toX)), \(Int(toY)))")
             }
         } catch let error as SimulatorError {
+            Output.printError(code: error.code, message: error.description,
+                            hint: error.hint, useJson: globals.useJson)
+            throw ExitCode(2)
+        }
+    }
+
+    private func swipeVphone(session: SessionData) throws {
+        let bridge = VphoneBridge(vmName: session.vphoneVM ?? "unknown", socketPath: session.vphoneSocket)
+        do {
+            try bridge.swipe(fromX: fromX, fromY: fromY, toX: toX, toY: toY, durationMs: Int(duration * 1000))
+            let result = SwipeResult(from: ["x": fromX, "y": fromY], to: ["x": toX, "y": toY], success: true)
+            if globals.useJson {
+                print(Output.json(result))
+            } else {
+                print("Swiped from (\(Int(fromX)), \(Int(fromY))) to (\(Int(toX)), \(Int(toY)))")
+            }
+        } catch let error as VphoneError {
             Output.printError(code: error.code, message: error.description,
                             hint: error.hint, useJson: globals.useJson)
             throw ExitCode(2)
