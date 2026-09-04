@@ -400,10 +400,17 @@ struct ConnectCommand: ParsableCommand {
             throw ExitCode(2)
         }
 
+        // Discover VM IP for VNC taps (socket tap broken in iOS 26)
+        if !globals.useJson {
+            print("Discovering VM IP for VNC tap support...")
+        }
+        let vmIP = VphoneBridge.discoverVMIP()
+
         var session = SessionData.empty
         session.connectedAt = now
         session.vphoneVM = bridge.vmName
         session.vphoneSocket = bridge.socketPath
+        session.vphoneIP = vmIP
 
         try store.save(session)
 
@@ -415,6 +422,11 @@ struct ConnectCommand: ParsableCommand {
             print(Output.json(result))
         } else {
             print("Connected to vphone VM: \(bridge.vmName)")
+            if let ip = vmIP {
+                print("VM IP: \(ip) (VNC taps enabled)")
+            } else {
+                print("⚠ VM IP not found — tap/click will not work. Screenshot and keys work.")
+            }
         }
     }
 }
@@ -612,7 +624,7 @@ struct SnapshotCommand: ParsableCommand {
             throw ExitCode(2)
         }
 
-        let bridge = VphoneBridge(vmName: vmName, socketPath: session.vphoneSocket)
+        let bridge = VphoneBridge(vmName: vmName, socketPath: session.vphoneSocket, vmIP: session.vphoneIP)
 
         // Take screenshot as the snapshot evidence
         let screenshotPath = "/tmp/agent-swift-vphone-snapshot.png"
@@ -689,7 +701,7 @@ struct PressCommand: ParsableCommand {
                 throw ExitCode(2)
             }
             let center = CGPoint(x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2)
-            let bridge = VphoneBridge(vmName: session.vphoneVM ?? "unknown", socketPath: session.vphoneSocket)
+            let bridge = VphoneBridge(vmName: session.vphoneVM ?? "unknown", socketPath: session.vphoneSocket, vmIP: session.vphoneIP)
             do {
                 try bridge.tap(x: center.x, y: center.y)
                 if globals.useJson {
@@ -1375,7 +1387,7 @@ struct ScreenshotCommand: ParsableCommand {
         let outputPath = path ?? "/tmp/agent-swift-screenshot.png"
 
         if session.isVphoneMode {
-            let bridge = VphoneBridge(vmName: session.vphoneVM ?? "unknown", socketPath: session.vphoneSocket)
+            let bridge = VphoneBridge(vmName: session.vphoneVM ?? "unknown", socketPath: session.vphoneSocket, vmIP: session.vphoneIP)
             do {
                 try bridge.screenshot(to: outputPath)
                 if globals.useJson {
@@ -2017,7 +2029,7 @@ struct ClickCommand: ParsableCommand {
             clickLabel = "\(Int(x)),\(Int(yCoord))"
         }
 
-        let bridge = VphoneBridge(vmName: session.vphoneVM ?? "unknown", socketPath: session.vphoneSocket)
+        let bridge = VphoneBridge(vmName: session.vphoneVM ?? "unknown", socketPath: session.vphoneSocket, vmIP: session.vphoneIP)
         do {
             try bridge.tap(x: tapX, y: tapY)
             if globals.useJson {
@@ -2281,7 +2293,7 @@ struct SwipeCommand: ParsableCommand {
     }
 
     private func swipeVphone(session: SessionData) throws {
-        let bridge = VphoneBridge(vmName: session.vphoneVM ?? "unknown", socketPath: session.vphoneSocket)
+        let bridge = VphoneBridge(vmName: session.vphoneVM ?? "unknown", socketPath: session.vphoneSocket, vmIP: session.vphoneIP)
         do {
             try bridge.swipe(fromX: fromX, fromY: fromY, toX: toX, toY: toY, durationMs: Int(duration * 1000))
             let result = SwipeResult(from: ["x": fromX, "y": fromY], to: ["x": toX, "y": toY], success: true)

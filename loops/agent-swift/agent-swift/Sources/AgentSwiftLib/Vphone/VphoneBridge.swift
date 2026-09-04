@@ -41,6 +41,8 @@ public enum VphoneError: Error, CustomStringConvertible {
 public struct VphoneBridge {
     public let socketPath: String
     public let vmName: String
+    /// VM IP address for VNC taps (socket tap is broken in iOS 26)
+    public var vmIP: String?
 
     /// Screen dimensions in pixels (3x retina)
     public static let screenWidthPx: Double = 1290
@@ -50,10 +52,19 @@ public struct VphoneBridge {
     /// Logical point dimensions (what agents use)
     public static let screenWidth: Double = 430
     public static let screenHeight: Double = 932
+    /// VNC port on jailbroken vphone VMs (TrollVNC)
+    public static let vncPort: Int = 5901
+    /// VNC password
+    public static let vncPassword: String = "alpine"
+    /// SSH port for uiopen commands
+    public static let sshPort: Int = 22222
+    /// SSH password
+    public static let sshPassword: String = "alpine"
 
-    public init(vmName: String, socketPath: String? = nil) {
+    public init(vmName: String, socketPath: String? = nil, vmIP: String? = nil) {
         self.vmName = vmName
         self.socketPath = socketPath ?? Self.defaultSocketPath(for: vmName)
+        self.vmIP = vmIP
     }
 
     public static func defaultSocketPath(for vmName: String) -> String {
@@ -85,6 +96,34 @@ public struct VphoneBridge {
         throw VphoneError.socketNotFound("No vphone.sock found in \(vmsDir)")
     }
 
+    /// Discover VM IP by scanning bridge network (192.168.64.x) via SSH probe
+    public static func discoverVMIP() -> String? {
+        // Try common bridge IPs — vphone NAT VMs typically get IPs in 192.168.64.x range
+        let candidates = (2...30).map { "192.168.64.\($0)" }
+        for ip in candidates {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["sshpass", "-p", sshPassword,
+                                "ssh", "-o", "StrictHostKeyChecking=no",
+                                "-o", "ConnectTimeout=2",
+                                "-p", "\(sshPort)", "root@\(ip)",
+                                "echo", "ok"]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+            do {
+                try process.run()
+                process.waitUntilExit()
+                if process.terminationStatus == 0 {
+                    return ip
+                }
+            } catch {
+                continue
+            }
+        }
+        return nil
+    }
+
     /// Check if socket file exists
     public func isAvailable() -> Bool {
         FileManager.default.fileExists(atPath: socketPath)
@@ -100,29 +139,26 @@ public struct VphoneBridge {
         }
     }
 
+    /// Tap at logical coordinates via VNC (vncdo).
+    /// Socket tap is broken in iOS 26 (returns ok:true but has zero effect).
+    /// VNC tap through TrollVNC port 5901 delivers real iOS touch events.
     public func tap(x: Double, y: Double) throws {
+        guard let ip = vmIP else {
+            throw VphoneError.commandFailed(
+                "No VM IP configured — cannot send VNC tap. " +
+                "Reconnect with: agent-swift connect --vphone \(vmName)")
+        }
         let px = Int(x * Self.scale)
         let py = Int(y * Self.scale)
-        let resp = try send(["t": "tap", "x": px, "y": py])
-        guard resp["ok"] as? Bool == true else {
-            let err = resp["error"] as? String ?? "tap failed"
-            throw VphoneError.commandFailed(err)
-        }
+        try runVncTap(ip: ip, x: px, y: py)
     }
 
+    /// Swipe is NOT supported — VNC drag does not translate to iOS swipe,
+    /// and socket swipe is broken (iOS 26 HID issue).
     public func swipe(fromX: Double, fromY: Double, toX: Double, toY: Double, durationMs: Int = 300) throws {
-        let resp = try send([
-            "t": "swipe",
-            "x1": Int(fromX * Self.scale),
-            "y1": Int(fromY * Self.scale),
-            "x2": Int(toX * Self.scale),
-            "y2": Int(toY * Self.scale),
-            "ms": durationMs,
-        ])
-        guard resp["ok"] as? Bool == true else {
-            let err = resp["error"] as? String ?? "swipe failed"
-            throw VphoneError.commandFailed(err)
-        }
+        throw VphoneError.commandFailed(
+            "Swipe not available in vphone mode (iOS 26 HID limitation). " +
+            "Use SSH uiopen for navigation: sshpass -p alpine ssh -p 22222 root@\(vmIP ?? "VM_IP") uiopen <url>")
     }
 
     public func key(_ name: String) throws {
@@ -130,6 +166,59 @@ public struct VphoneBridge {
         guard resp["ok"] as? Bool == true else {
             let err = resp["error"] as? String ?? "key \(name) failed"
             throw VphoneError.commandFailed(err)
+        }
+    }
+
+    /// Open an app or URL via SSH uiopen (bypasses lock screen, no touch needed)
+    public func uiopen(_ target: String) throws {
+        guard let ip = vmIP else {
+            throw VphoneError.commandFailed("No VM IP — cannot SSH to VM")
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["sshpass", "-p", Self.sshPassword,
+                            "ssh", "-o", "StrictHostKeyChecking=no",
+                            "-p", "\(Self.sshPort)", "root@\(ip)",
+                            "uiopen", target]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            throw VphoneError.commandFailed("uiopen failed: \(out.trimmingCharacters(in: .whitespacesAndNewlines))")
+        }
+    }
+
+    // MARK: - VNC tap (workaround for broken socket touch)
+
+    /// Send a tap via vncdotool to TrollVNC on port 5901.
+    /// Must pause 8s on first connect to let the notification banner clear.
+    private func runVncTap(ip: String, x: Int, y: Int) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        // vncdo -s <ip>::5901 -p alpine -t 15 pause 8 move X Y pause 0.2 click 1
+        process.arguments = ["vncdo",
+                            "-s", "\(ip)::\(Self.vncPort)",
+                            "-p", Self.vncPassword,
+                            "-t", "15",
+                            "pause", "8",
+                            "move", "\(x)", "\(y)",
+                            "pause", "0.2",
+                            "click", "1"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            throw VphoneError.commandFailed("vncdo not found — install: pip install vncdotool")
+        }
+        guard process.terminationStatus == 0 else {
+            let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            throw VphoneError.commandFailed("VNC tap failed: \(out.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
     }
 
