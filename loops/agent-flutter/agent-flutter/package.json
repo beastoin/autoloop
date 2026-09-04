@@ -13,7 +13,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
   "keywords": [
     "flutter",
@@ -42,6 +42,7 @@
   "scripts": {
     "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=dist/cli.mjs --external:node:*",
     "typecheck": "tsc --noEmit",
+    "test": "node --test __tests__/*.test.ts",
     "test:unit": "node --test __tests__/*.test.ts",
     "prepublishOnly": "npm run typecheck && npm run test:unit && npm run build"
   },

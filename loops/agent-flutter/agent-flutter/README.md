@@ -1,6 +1,6 @@
 # agent-flutter
 
-[![npm](https://img.shields.io/npm/v/agent-flutter-cli)](https://www.npmjs.com/package/agent-flutter-cli)
+[![npm](https://img.shields.io/npm/v/@beastoin/agent-flutter)](https://www.npmjs.com/package/@beastoin/agent-flutter)
 
 CLI for AI agents to control Flutter apps via Dart VM Service + Marionette. Same `@ref` + snapshot workflow as `agent-device` and `agent-browser`.
 
@@ -32,7 +32,7 @@ void main() {
 
 ### Runtime requirements
 
-- **Node.js 18+**
+- **Node.js 22+**
 - **ADB** accessible (`adb devices` shows your target)
 - Flutter app running via `flutter run` (debug or profile mode — exposes Dart VM Service)
 
@@ -42,7 +42,7 @@ void main() {
 
 ```bash
 # Install
-npm install -g agent-flutter-cli
+npm install -g @beastoin/agent-flutter
 
 # Verify prerequisites
 agent-flutter doctor
@@ -75,7 +75,7 @@ agent-flutter connect ws://127.0.0.1:38047/abc=/ws
 | `disconnect` | Disconnect from Flutter app | `agent-flutter disconnect` |
 | `status` | Show connection state | `agent-flutter status` |
 | `snapshot [-i] [-c] [-d N] [--diff]` | Capture widget snapshot with refs | `agent-flutter snapshot -i` |
-| `press <ref> \| <x> <y>` | Tap by ref, coordinates, or ref via ADB (`--adb`) | `agent-flutter press @e3` |
+| `press <ref> \| <x> <y>` | Tap by ref, coordinates, or via native ADB (`--native`) | `agent-flutter press @e3` |
 | `fill <ref> <text>` | Enter text by ref | `agent-flutter fill @e5 "hello"` |
 | `get <property> <ref>` | Read `text`, `type`, `key`, or `attrs` | `agent-flutter get attrs @e3` |
 | `find <locator> <value> [action] [arg]` | Find by `key`, `text`, or `type` | `agent-flutter find text "Submit" press` |
@@ -89,6 +89,8 @@ agent-flutter connect ws://127.0.0.1:38047/abc=/ws
 | `reload` | Trigger Flutter hot reload | `agent-flutter reload` |
 | `logs` | Get Flutter app logs | `agent-flutter logs` |
 | `schema [command]` | Output command schema (JSON) | `agent-flutter schema press` |
+| `text [--method uiautomator\|marionette]` | Get visible text from screen | `agent-flutter text` |
+| `dismiss` | Dismiss keyboard/dialogs | `agent-flutter dismiss` |
 | `doctor` | Check prerequisites and diagnose issues | `agent-flutter doctor` |
 
 ### Global flags
@@ -99,6 +101,8 @@ agent-flutter connect ws://127.0.0.1:38047/abc=/ws
 | `--json` | Force JSON output |
 | `--no-json` | Force human-readable output |
 | `--dry-run` | Resolve target without executing |
+| `--native` | Use native ADB input instead of Marionette |
+| `--platform <android\|ios>` | Target platform |
 | `--help` | Show help (`--help --json` returns schema) |
 
 ## Snapshot format

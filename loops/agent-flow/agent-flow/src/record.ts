@@ -15,7 +15,7 @@ export interface RecordInitOptions { flowPath: string; outputDir: string; runId?
 export interface RecordInitResult { id: string; dir: string; video?: boolean; replay?: ReplayPlan; recipe?: StepRecipe[]; evidence?: string[]; warnings?: string[]; }
 
 export function recordInit(opts: RecordInitOptions): RecordInitResult {
-  const id = opts.runId || randomBytes(5).toString('base64url').slice(0, 10);
+  const id = opts.runId || randomBytes(7).toString('base64url').slice(0, 10);
   const runDir = join(opts.outputDir, id);
   mkdirSync(runDir, { recursive: true });
   const flowContent = readFileSync(opts.flowPath, 'utf-8');

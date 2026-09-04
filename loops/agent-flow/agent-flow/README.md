@@ -17,7 +17,7 @@ Android / iOS / macOS devices
 ## Install
 
 ```bash
-npm install -g agent-flow-cli
+npm install -g @beastoin/agent-flow
 ```
 
 Requires Node.js >= 22, [agent-flutter](https://github.com/beastoin/agent-flutter) in PATH, and a Flutter app running in debug mode.
@@ -242,7 +242,7 @@ Key fields: top-level `result` (`pass`|`fail`|`unverified`), per-step `outcome` 
 - **Schema introspection** — `agent-flow schema` returns versioned JSON with typed args/flags
 - **Structured errors** — `{code, message, hint, diagnosticId}` in JSON
 - **Input hardening** — path traversal, control chars, URI format validated
-- **TTY-aware JSON** — `--no-json` > `--json` > `FLOW_WALKER_JSON=1` > TTY auto-detect
+- **TTY-aware JSON** — `--no-json` > `--json` > `AGENT_FLOW_JSON=1` > TTY auto-detect
 - **Dry-run** — `--dry-run` resolves without executing
 - **NDJSON streaming** — walk emits events as one JSON per line
 - **Unique run IDs** — 10-char base64url, filesystem-safe, URL-safe
@@ -253,11 +253,11 @@ Key fields: top-level `result` (`pass`|`fail`|`unverified`), per-step `outcome` 
 
 | Variable | Description |
 |----------|-------------|
-| `FLOW_WALKER_OUTPUT_DIR` | Default output directory |
-| `FLOW_WALKER_AGENT_PATH` | Path to agent-flutter binary |
-| `FLOW_WALKER_DRY_RUN` | Enable dry-run mode |
-| `FLOW_WALKER_JSON` | Force JSON output |
-| `FLOW_WALKER_API_URL` | Custom hosted service URL |
+| `AGENT_FLOW_OUTPUT_DIR` | Default output directory |
+| `AGENT_FLOW_AGENT_PATH` | Path to agent-flutter binary |
+| `AGENT_FLOW_DRY_RUN` | Enable dry-run mode |
+| `AGENT_FLOW_JSON` | Force JSON output |
+| `AGENT_FLOW_API_URL` | Custom hosted service URL |
 
 ## Architecture
 

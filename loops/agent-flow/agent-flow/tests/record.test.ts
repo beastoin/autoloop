@@ -175,6 +175,38 @@ describe('recordFinish renames log files', () => {
   });
 });
 
+describe('run ID length', () => {
+  it('generated run IDs are exactly 10 characters', () => {
+    setup();
+    const r = recordInit({ flowPath: flowFile, outputDir: tmpDir });
+    assert.equal(r.id.length, 10, `run ID should be 10 chars, got ${r.id.length}: "${r.id}"`);
+  });
+
+  it('generated run IDs are base64url-safe', () => {
+    setup();
+    const r = recordInit({ flowPath: flowFile, outputDir: tmpDir });
+    assert.ok(/^[A-Za-z0-9_-]+$/.test(r.id), `run ID should be base64url: "${r.id}"`);
+  });
+
+  it('multiple IDs are unique and all 10 chars', () => {
+    setup();
+    const ids = new Set<string>();
+    for (let i = 0; i < 10; i++) {
+      const r = recordInit({ flowPath: flowFile, outputDir: tmpDir, runId: undefined });
+      assert.equal(r.id.length, 10);
+      ids.add(r.id);
+    }
+    assert.equal(ids.size, 10, 'all IDs should be unique');
+  });
+
+  it('custom runId preserves exact length', () => {
+    setup();
+    const r = recordInit({ flowPath: flowFile, outputDir: tmpDir, runId: 'abcde12345' });
+    assert.equal(r.id, 'abcde12345');
+    assert.equal(r.id.length, 10);
+  });
+});
+
 describe('generateRecipe', () => {
   it('produces per-step event recipes', () => {
     const flow: FlowV2 = {

@@ -378,6 +378,35 @@ steps:
     assert.equal(flow.steps[0].judge![1].prompt, 'Is the username displayed correctly?');
   });
 
+  it('parses flow-level evidence block', () => {
+    const yaml = `
+version: 2
+name: evidence-test
+evidence:
+  video: true
+
+steps:
+  - id: S1
+    do: Check home
+`;
+    const flow = parseFlowV2(yaml);
+    assert.ok(flow.evidence, 'should have flow-level evidence');
+    assert.equal(flow.evidence!.video, true);
+  });
+
+  it('evidence.video defaults to undefined when not set', () => {
+    const yaml = `
+version: 2
+name: no-evidence
+
+steps:
+  - id: S1
+    do: Check home
+`;
+    const flow = parseFlowV2(yaml);
+    assert.equal(flow.evidence, undefined);
+  });
+
   it('parses expect with min field', () => {
     const yaml = `
 version: 2

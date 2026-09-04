@@ -3,38 +3,36 @@
   "flow": "counter-increment",
   "flowHash": "673dedc320ea3106",
   "device": {
-    "model": "unknown",
+    "model": "emulator-5558",
     "resolution": "unknown"
   },
-  "createdAt": "2026-03-28T23:18:35.545Z",
-  "runId": "H3v3nh8",
-  "totalDurationMs": 4000,
+  "createdAt": "2026-09-04T07:18:21.719Z",
+  "runId": "WEZuYLk5pA",
+  "totalDurationMs": 2000,
   "verifySteps": [
     "S1",
-    "S2",
-    "S3",
     "S4"
   ],
   "steps": {
     "S1": {
       "kind": "verify",
-      "waitAfterMs": 200,
+      "waitAfterMs": 1000,
       "durationMs": 0
     },
     "S2": {
-      "kind": "verify",
-      "waitAfterMs": 200,
-      "durationMs": 2000
+      "kind": "action",
+      "waitAfterMs": 1000,
+      "durationMs": 0
     },
     "S3": {
-      "kind": "verify",
+      "kind": "action",
       "waitAfterMs": 200,
-      "durationMs": 1000
+      "durationMs": 0
     },
     "S4": {
       "kind": "verify",
       "waitAfterMs": 500,
-      "durationMs": 1000
+      "durationMs": 0
     }
   }
 }

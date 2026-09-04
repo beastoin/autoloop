@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateFlowsV2, toYamlV2 } from '../src/yaml-writer.ts';
 import { NavigationGraph } from '../src/graph.ts';
+import { parseFlowV2 } from '../src/flow-parser.ts';
 import type { FlowV2 } from '../src/types.ts';
 
 describe('generateFlowsV2', () => {
@@ -110,6 +111,53 @@ describe('toYamlV2', () => {
     assert.ok(yaml.includes('- file1.dart'));
     assert.ok(yaml.includes('preconditions:'));
     assert.ok(yaml.includes('- User logged in'));
+  });
+
+  it('includes flow-level evidence block', () => {
+    const flow: FlowV2 = {
+      version: 2,
+      name: 'evidence-test',
+      evidence: { video: true },
+      steps: [{ id: 'S1', do: 'Check' }],
+    };
+
+    const yaml = toYamlV2(flow);
+    assert.ok(yaml.includes('evidence:'), 'YAML should contain evidence block');
+    assert.ok(yaml.includes('video: true'), 'YAML should contain video: true');
+  });
+
+  it('evidence.video round-trips through parse→write', () => {
+    const flow: FlowV2 = {
+      version: 2,
+      name: 'roundtrip-evidence',
+      evidence: { video: true },
+      steps: [{ id: 'S1', do: 'Check' }],
+    };
+
+    const yaml = toYamlV2(flow);
+    // Re-parse the generated YAML
+    const reparsed = parseFlowV2(yaml);
+    assert.deepEqual(reparsed.evidence, { video: true }, 'evidence.video should round-trip');
+
+    // Write again and verify stable
+    const yaml2 = toYamlV2(reparsed);
+    assert.ok(yaml2.includes('video: true'), 'second write should preserve evidence');
+  });
+
+  it('omits evidence block when not present', () => {
+    const flow: FlowV2 = {
+      version: 2,
+      name: 'no-evidence',
+      steps: [{ id: 'S1', do: 'Check' }],
+    };
+
+    const yaml = toYamlV2(flow);
+    // Should not have an evidence block at the flow level (step-level is different)
+    const lines = yaml.split('\n');
+    const evidenceLines = lines.filter((l, i) => l.trim() === 'evidence:' && (i === 0 || !lines[i-1].trim().startsWith('-')));
+    // Flow-level evidence: appears before steps, at root indent
+    const preSteps = yaml.split('steps:')[0];
+    assert.ok(!preSteps.includes('evidence:'), 'should not have flow-level evidence when not set');
   });
 
   it('includes defaults block', () => {

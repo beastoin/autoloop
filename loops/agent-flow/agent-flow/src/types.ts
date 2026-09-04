@@ -80,8 +80,6 @@ export interface FlowV2 {
   steps: FlowV2Step[];
 }
 
-export interface StepHint { screen: string; refs: Record<string, string>; }
-export interface FlowHints { version: 1; flow: string; steps: Record<string, StepHint>; }
 
 /** Agent transport type */
 export type AgentType = 'flutter' | 'swift';

@@ -171,18 +171,6 @@ function parseInlineArr(raw: string): string[] {
   if (!inner) return [];
   return splitC(inner).map(x => pv(x)).filter(Boolean);
 }
-function parseInlineObj(raw: string): Record<string, unknown> {
-  const s = raw.trim();
-  if (!s.startsWith('{') || !s.endsWith('}')) return {};
-  const inner = s.slice(1, -1).trim();
-  if (!inner) return {};
-  const obj: Record<string, unknown> = {};
-  for (const pair of splitC(inner)) {
-    const ci = pair.indexOf(':');
-    if (ci > 0) { const k = pair.slice(0, ci).trim(); const v = pv(pair.slice(ci + 1)); const n = Number(v); obj[k] = v === "true" ? true : v === "false" ? false : isNaN(n) ? v : n; }
-  }
-  return obj;
-}
 function splitC(str: string): string[] {
   const parts: string[] = []; let cur = ''; let inQ = false; let qc = '';
   for (const ch of str) {

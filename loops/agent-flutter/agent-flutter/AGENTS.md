@@ -254,7 +254,7 @@ Precedence: CLI flag > env var > built-in default.
 
 ## Supported widget types
 
-agent-flutter recognizes 93 Flutter widget types, mapped to ~30 display types. See `WIDGET_SUPPORT.md` for the full coverage matrix including Marionette detection status.
+agent-flutter recognizes 93 Flutter widget types, mapped to ~30 display types.
 
 ### Interactive types (appear in `snapshot -i`)
 

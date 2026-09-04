@@ -3,7 +3,7 @@
  * Auto-detects from adb logcat if no URI given.
  */
 import { VmServiceClient } from '../vm-client.ts';
-import { saveSession, clearSession } from '../session.ts';
+import { saveSession } from '../session.ts';
 import { detectVmServiceUriAsync, setupPortForwarding } from '../auto-detect.ts';
 
 export async function connectCommand(args: string[]): Promise<void> {

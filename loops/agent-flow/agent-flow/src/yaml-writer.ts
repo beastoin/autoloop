@@ -95,6 +95,7 @@ export function toYamlV2(flow: FlowV2): string {
   if (flow.covers?.length) { lines.push('covers:'); for (const c of flow.covers) lines.push(`  - ${c}`); }
   if (flow.preconditions?.length) { lines.push('preconditions:'); for (const p of flow.preconditions) lines.push(`  - ${p}`); }
   if (flow.defaults) { lines.push('defaults:'); if (flow.defaults.timeout_ms) lines.push(`  timeout_ms: ${flow.defaults.timeout_ms}`); if (flow.defaults.retries) lines.push(`  retries: ${flow.defaults.retries}`); if (flow.defaults.vision) lines.push(`  vision: ${flow.defaults.vision}`); }
+  if (flow.evidence) { lines.push('evidence:'); if (flow.evidence.video !== undefined) lines.push(`  video: ${flow.evidence.video}`); }
   lines.push(''); lines.push('steps:');
   for (const step of flow.steps) {
     lines.push(`  - id: ${step.id}`); if (step.name) lines.push(`    name: ${step.name}`); lines.push(`    do: ${step.do}`);

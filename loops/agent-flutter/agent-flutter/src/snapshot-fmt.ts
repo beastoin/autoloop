@@ -9,8 +9,7 @@ export type RefElement = FlutterElement & {
 };
 
 /** Map Flutter widget types to lowercase display types.
- *  Covers all official Flutter interactive widgets (Material + Cupertino).
- *  See WIDGET_SUPPORT.md for full coverage matrix. */
+ *  Covers all official Flutter interactive widgets (Material + Cupertino). */
 const TYPE_MAP: Record<string, string> = {
   // --- Material Buttons ---
   ElevatedButton: 'button',
