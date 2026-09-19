@@ -9,7 +9,7 @@ struct AgentSwift: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "agent-swift",
         abstract: "CLI for AI agents to control macOS apps via Accessibility API",
-        version: "0.10.0",
+        version: "0.11.0",
         subcommands: [
             DoctorCommand.self,
             ConnectCommand.self,
@@ -147,6 +147,28 @@ struct DoctorCommand: ParsableCommand {
                     message: booted != nil ? "Simulator \(session.simulatorDeviceType ?? udid) is booted" : "Simulator \(udid) is not booted",
                     fix: booted != nil ? nil : "Boot simulator: xcrun simctl boot \(udid)"
                 ))
+
+                // Functional probe: check if idb accessibility works
+                if idbAvail && booted != nil {
+                    let simAX = SimAXBridge(udid: udid)
+                    let (idbOk, idbDiag) = simAX.probeIdb()
+                    if idbOk {
+                        checks.append(Check(
+                            name: "idb_accessibility",
+                            status: "pass",
+                            message: idbDiag
+                        ))
+                    } else {
+                        // idb failed — check AX fallback
+                        let (axOk, axDiag) = simAX.probeAXAccess()
+                        checks.append(Check(
+                            name: "idb_accessibility",
+                            status: axOk ? "warn" : "fail",
+                            message: "idb: \(idbDiag)" + (axOk ? " (AX fallback available: \(axDiag))" : " (AX fallback: \(axDiag))"),
+                            fix: axOk ? nil : "Grant Accessibility access in System Settings > Privacy & Security > Accessibility"
+                        ))
+                    }
+                }
                 _ = bridge
             }
         } else {
@@ -158,6 +180,17 @@ struct DoctorCommand: ParsableCommand {
                 fix: trusted ? nil : "Grant access in System Settings > Privacy & Security > Accessibility"
             ))
 
+            // SkyLight background input check
+            let skylight = SkyLightBridge.shared
+            checks.append(Check(
+                name: "background_input",
+                status: skylight.isAvailable ? "pass" : "warn",
+                message: skylight.isAvailable
+                    ? "SkyLight background input available (\(skylight.diagnostic))"
+                    : "SkyLight not available — background mode disabled (\(skylight.diagnostic))",
+                fix: skylight.isAvailable ? nil : "Use --background flag with click/type/scroll when SkyLight is available"
+            ))
+
             if session.isConnected, let pid = session.pid {
                 let running = AXClient.isProcessRunning(pid: pid)
                 checks.append(Check(
@@ -166,6 +199,19 @@ struct DoctorCommand: ParsableCommand {
                     message: running ? "Target app (PID \(pid)) is running" : "Target app (PID \(pid)) is NOT running",
                     fix: running ? nil : "Reconnect with: agent-swift connect"
                 ))
+
+                // WindowID resolution check
+                if running {
+                    let hasWindow = session.windowID != nil
+                    checks.append(Check(
+                        name: "window_id",
+                        status: hasWindow ? "pass" : "warn",
+                        message: hasWindow
+                            ? "Window ID resolved: \(session.windowID!)"
+                            : "No window ID — background click/scroll unavailable",
+                        fix: hasWindow ? nil : "Reconnect: agent-swift connect (ensures window ID is captured)"
+                    ))
+                }
             }
         }
 
@@ -278,6 +324,11 @@ struct ConnectCommand: ParsableCommand {
         session.pid = resolvedPid
         session.bundleId = resolvedBundleId
         session.connectedAt = now
+
+        // Resolve CGWindowID for background input delivery
+        if let wid = EventStamping.resolveWindowID(pid: resolvedPid) {
+            session.windowID = Int(wid)
+        }
 
         try store.save(session)
 
@@ -581,26 +632,39 @@ struct SnapshotCommand: ParsableCommand {
     }
 
     private func snapshotSimulator(store: SessionStore, session: inout SessionData, udid: String) throws {
-        let idb = IdbBridge(udid: udid)
-        let idbElements: [IdbElement]
-        do {
-            idbElements = try idb.describeAll(includeAll: all)
-        } catch let error as IdbError {
-            Output.printError(code: error.code, message: error.description,
-                            hint: error.hint, useJson: globals.useJson)
-            throw ExitCode(2)
-        }
+        var method = "idb"
+        var allNodes: [AXNode] = []
 
-        var filtered = idbElements
-        if interactive && !all {
-            filtered = filtered.filter { $0.isInteractive }
+        // Try idb first
+        let idb = IdbBridge(udid: udid)
+        do {
+            let idbElements = try idb.describeAll(includeAll: all)
+            var filtered = idbElements
+            if interactive && !all {
+                filtered = filtered.filter { $0.isInteractive }
+            }
+            allNodes = filtered.map { $0.toAXNode() }
+            method = "idb"
+        } catch {
+            // idb failed — fall back to AX on Simulator.app
+            let simAX = SimAXBridge(udid: udid)
+            do {
+                allNodes = try simAX.describeAll(interactive: interactive && !all)
+                method = "ax"
+            } catch let axError as SimulatorError {
+                // Both idb and AX failed
+                Output.printError(code: "SIM_SNAPSHOT_FAILED",
+                                message: "Snapshot failed via idb (\(error)) and AX (\(axError))",
+                                hint: "Ensure Simulator.app is running and Accessibility is trusted",
+                                useJson: globals.useJson)
+                throw ExitCode(2)
+            }
         }
 
         var elements: [(ref: String, node: AXNode)] = []
         var refs: [String: SessionData.RefEntry] = [:]
-        for (i, idbEl) in filtered.enumerated() {
+        for (i, node) in allNodes.enumerated() {
             let ref = "e\(i + 1)"
-            let node = idbEl.toAXNode()
             elements.append((ref: ref, node: node))
             refs[ref] = node.toRefEntry()
         }
@@ -608,11 +672,15 @@ struct SnapshotCommand: ParsableCommand {
         session.refs = refs
         session.lastSnapshotAt = ISO8601DateFormatter().string(from: Date())
         session.interactiveSnapshot = interactive
+        session.snapshotMethod = method
         try store.save(session)
 
         if globals.useJson {
-            print(SnapshotFormatter.formatJson(elements: elements))
+            print(SnapshotFormatter.formatJson(elements: elements, method: method))
         } else {
+            if method == "ax" {
+                print("(using AX fallback — idb unavailable)")
+            }
             print(SnapshotFormatter.formatHuman(elements: elements))
         }
     }
@@ -895,22 +963,49 @@ struct FillCommand: ParsableCommand {
                                 hint: "Re-run: agent-swift snapshot -i", useJson: globals.useJson)
                 throw ExitCode(2)
             }
-            let idb = IdbBridge(udid: udid)
+
+            // Check if idb is known broken (snapshot used AX fallback)
+            let idbBroken = session.snapshotMethod == "ax"
+
+            if !idbBroken {
+                let idb = IdbBridge(udid: udid)
+                do {
+                    if let bounds = refEntry.bounds {
+                        let center = CGPoint(x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2)
+                        try idb.tap(x: center.x, y: center.y)
+                        Thread.sleep(forTimeInterval: 0.3)
+                    }
+                    try idb.text(input: text)
+                    if globals.useJson {
+                        print(Output.json(FillResult(filled: ref, text: text, success: true)))
+                    } else {
+                        print("Filled \(ref) with \"\(text)\"")
+                    }
+                    return
+                } catch {
+                    // Fall through to CGEvent fallback
+                }
+            }
+
+            // CGEvent fallback: tap via SimulatorBridge + type via CGEvent
+            let simAX = SimAXBridge(udid: udid)
             do {
+                let bridge = SimulatorBridge(udid: udid)
                 if let bounds = refEntry.bounds {
                     let center = CGPoint(x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2)
-                    try idb.tap(x: center.x, y: center.y)
+                    try bridge.tap(x: center.x, y: center.y)
                     Thread.sleep(forTimeInterval: 0.3)
                 }
-                try idb.text(input: text)
+                try simAX.typeViaCGEvent(text: text)
                 if globals.useJson {
                     print(Output.json(FillResult(filled: ref, text: text, success: true)))
                 } else {
-                    print("Filled \(ref) with \"\(text)\"")
+                    print("Filled \(ref) with \"\(text)\" (via keystroke)")
                 }
-            } catch let error as IdbError {
-                Output.printError(code: error.code, message: error.description,
-                                hint: error.hint, useJson: globals.useJson)
+            } catch let axError {
+                Output.printError(code: "SIM_FILL_FAILED",
+                                message: "Fill failed: \(axError)",
+                                hint: "Ensure Simulator.app is running", useJson: globals.useJson)
                 throw ExitCode(2)
             }
             return
@@ -1696,9 +1791,13 @@ struct ScrollCommand: ParsableCommand {
     @Option(name: .long, help: "Scroll amount in lines (default: 5)")
     var amount: Int = 5
 
+    @Flag(name: .long, help: "Use background PID delivery (no focus steal, no cursor move)")
+    var background = false
+
     struct ScrollResult: Codable {
         let target: String
         let success: Bool
+        var delivery: String? = nil
     }
 
     func run() throws {
@@ -1736,14 +1835,36 @@ struct ScrollCommand: ParsableCommand {
         switch target {
         case "up", "down":
             let scrollAmount = target == "up" ? Int32(amount) : -Int32(amount)
-            if let event = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: scrollAmount, wheel2: 0, wheel3: 0) {
+            let useBackground = background || ProcessInfo.processInfo.environment["AGENT_SWIFT_BACKGROUND"] == "1"
+
+            if useBackground, let wid = session.windowID, SkyLightBridge.shared.canPostToPid {
+                // Background scroll: PID-targeted via SkyLight
+                // Use center of window as scroll position
+                let scrollPoint = CGPoint(x: 400, y: 300)
+                let focusGuard = FocusGuard()
+                let success = focusGuard.withSuppression(for: pid) {
+                    EventStamping.backgroundScroll(at: scrollPoint, pid: pid, windowID: CGWindowID(wid), deltaY: scrollAmount)
+                }
+                if success {
+                    if globals.useJson {
+                        print(Output.json(ScrollResult(target: target, success: true, delivery: "background")))
+                    } else {
+                        print("Scrolled \(target) [background]")
+                    }
+                } else {
+                    Output.printError(code: "SCROLL_FAILED", message: "Background scroll failed",
+                                    hint: "Try without --background flag", useJson: globals.useJson)
+                    throw ExitCode(2)
+                }
+            } else if let event = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: scrollAmount, wheel2: 0, wheel3: 0) {
+                // Foreground scroll
                 if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
                     app.activate()
                     Thread.sleep(forTimeInterval: 0.1)
                 }
                 event.post(tap: .cgSessionEventTap)
                 if globals.useJson {
-                    print(Output.json(ScrollResult(target: target, success: true)))
+                    print(Output.json(ScrollResult(target: target, success: true, delivery: "foreground")))
                 } else {
                     print("Scrolled \(target)")
                 }
@@ -1833,12 +1954,16 @@ struct ClickCommand: ParsableCommand {
     @Argument(help: "Y-coordinate (when using x y)")
     var y: Double?
 
+    @Flag(name: .long, help: "Use background PID delivery (no focus steal, no cursor move)")
+    var background = false
+
     struct ClickResult: Codable {
         let clicked: String
         let x: Double
         let y: Double
         let success: Bool
         let mode: String?
+        var delivery: String? = nil
         let iosPoint: [String: Double]?
         let screenPoint: [String: Double]?
     }
@@ -1902,22 +2027,45 @@ struct ClickCommand: ParsableCommand {
             clickLabel = "\(Int(x)),\(Int(yCoord))"
         }
 
-        if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
-            app.activate()
-            Thread.sleep(forTimeInterval: 0.1)
-        }
+        let useBackground = background || ProcessInfo.processInfo.environment["AGENT_SWIFT_BACKGROUND"] == "1"
 
-        if AXClient.performClick(at: clickPoint) {
-            if globals.useJson {
-                print(Output.json(ClickResult(clicked: clickLabel, x: clickPoint.x, y: clickPoint.y,
-                                              success: true, mode: "desktop", iosPoint: nil, screenPoint: nil)))
+        if useBackground, let wid = session.windowID, SkyLightBridge.shared.canPostToPid {
+            // Background delivery: PID-targeted via SkyLight, no cursor move, no focus steal
+            let focusGuard = FocusGuard()
+            let success = focusGuard.withSuppression(for: pid) {
+                EventStamping.backgroundClick(at: clickPoint, pid: pid, windowID: CGWindowID(wid))
+            }
+            if success {
+                if globals.useJson {
+                    print(Output.json(ClickResult(clicked: clickLabel, x: clickPoint.x, y: clickPoint.y,
+                                                  success: true, mode: "desktop", delivery: "background", iosPoint: nil, screenPoint: nil)))
+                } else {
+                    print("Clicked \(clickLabel) at (\(Int(clickPoint.x)), \(Int(clickPoint.y))) [background]")
+                }
             } else {
-                print("Clicked \(clickLabel) at (\(Int(clickPoint.x)), \(Int(clickPoint.y)))")
+                Output.printError(code: "CLICK_FAILED", message: "Background click failed",
+                                hint: "Try without --background flag", useJson: globals.useJson)
+                throw ExitCode(2)
             }
         } else {
-            Output.printError(code: "CLICK_FAILED", message: "Failed to create click event",
-                            hint: "Ensure Accessibility permission is granted", useJson: globals.useJson)
-            throw ExitCode(2)
+            // Foreground delivery: activate app, move cursor
+            if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
+                app.activate()
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+
+            if AXClient.performClick(at: clickPoint) {
+                if globals.useJson {
+                    print(Output.json(ClickResult(clicked: clickLabel, x: clickPoint.x, y: clickPoint.y,
+                                                  success: true, mode: "desktop", delivery: "foreground", iosPoint: nil, screenPoint: nil)))
+                } else {
+                    print("Clicked \(clickLabel) at (\(Int(clickPoint.x)), \(Int(clickPoint.y)))")
+                }
+            } else {
+                Output.printError(code: "CLICK_FAILED", message: "Failed to create click event",
+                                hint: "Ensure Accessibility permission is granted", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
         }
     }
 
@@ -2090,9 +2238,14 @@ struct TypeCommand: ParsableCommand {
     @Argument(help: "Text to type")
     var text: String
 
+    @Flag(name: .long, help: "Use background PID delivery (no focus steal)")
+    var background = false
+
     struct TypeResult: Codable {
         let typed: String
         let success: Bool
+        var method: String? = nil
+        var delivery: String? = nil
     }
 
     func run() throws {
@@ -2128,45 +2281,97 @@ struct TypeCommand: ParsableCommand {
             throw ExitCode(2)
         }
 
-        let root = AXClient.appElement(pid: pid)
-        // Try to find the focused element and fill it
-        let focusedElement = AXClient.focusedElement(of: root)
-        if let focused = focusedElement {
-            if AXClient.performFill(element: focused, text: text) {
-                if globals.useJson {
-                    print(Output.json(TypeResult(typed: text, success: true)))
-                } else {
-                    print("Typed \"\(text)\"")
-                }
-                return
-            }
-        }
+        let useBackground = background || ProcessInfo.processInfo.environment["AGENT_SWIFT_BACKGROUND"] == "1"
 
-        // Fallback: use CGEvent key-by-key typing
-        if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
-            app.activate()
-            Thread.sleep(forTimeInterval: 0.1)
-        }
-        typeViaCGEvent(text: text)
-        if globals.useJson {
-            print(Output.json(TypeResult(typed: text, success: true)))
+        if useBackground && SkyLightBridge.shared.canPostToPid {
+            // Background delivery: AX semantic (preferred) + SkyLight keyboard (fallback)
+            let root = AXClient.appElement(pid: pid)
+            let focusedEl = AXClient.focusedElement(of: root)
+            let focusGuard = FocusGuard()
+            let (success, method) = focusGuard.withSuppression(for: pid) {
+                EventStamping.backgroundType(text: text, pid: pid, focusElement: focusedEl)
+            }
+            if success {
+                if globals.useJson {
+                    print(Output.json(TypeResult(typed: text, success: true, method: method, delivery: "background")))
+                } else {
+                    print("Typed \"\(text)\" [background/\(method)]")
+                }
+            } else {
+                Output.printError(code: "TYPE_FAILED", message: "Background type failed",
+                                hint: "Try without --background flag", useJson: globals.useJson)
+                throw ExitCode(2)
+            }
         } else {
-            print("Typed \"\(text)\" (via keystroke)")
+            // Foreground path: AX fill or CGEvent fallback
+            let root = AXClient.appElement(pid: pid)
+            let focusedElement = AXClient.focusedElement(of: root)
+            if let focused = focusedElement {
+                if AXClient.performFill(element: focused, text: text) {
+                    if globals.useJson {
+                        print(Output.json(TypeResult(typed: text, success: true, delivery: "foreground")))
+                    } else {
+                        print("Typed \"\(text)\"")
+                    }
+                    return
+                }
+            }
+
+            // Fallback: use CGEvent key-by-key typing
+            if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
+                app.activate()
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+            typeViaCGEvent(text: text)
+            if globals.useJson {
+                print(Output.json(TypeResult(typed: text, success: true, delivery: "foreground")))
+            } else {
+                print("Typed \"\(text)\" (via keystroke)")
+            }
         }
     }
 
     private func typeSimulator(udid: String) throws {
-        let idb = IdbBridge(udid: udid)
-        do {
-            try idb.text(input: text)
-            if globals.useJson {
-                print(Output.json(TypeResult(typed: text, success: true)))
-            } else {
-                print("Typed \"\(text)\"")
+        let store = SessionStore()
+        let session = store.load()
+
+        // If idb was already known broken (snapshot used AX fallback), skip idb text
+        let idbBroken = session.snapshotMethod == "ax"
+
+        if !idbBroken {
+            // Try idb first — but verify it actually works by probing
+            let simAX = SimAXBridge(udid: udid)
+            let (idbOk, _) = simAX.probeIdb()
+            if idbOk {
+                let idb = IdbBridge(udid: udid)
+                do {
+                    try idb.text(input: text)
+                    if globals.useJson {
+                        print(Output.json(TypeResult(typed: text, success: true, method: "idb")))
+                    } else {
+                        print("Typed \"\(text)\"")
+                    }
+                    return
+                } catch {
+                    // Fall through to CGEvent
+                }
             }
-        } catch let error as IdbError {
-            Output.printError(code: error.code, message: error.description,
-                            hint: error.hint, useJson: globals.useJson)
+        }
+
+        // Use CGEvent keyboard through Simulator window
+        let simAX = SimAXBridge(udid: udid)
+        do {
+            try simAX.typeViaCGEvent(text: text)
+            if globals.useJson {
+                print(Output.json(TypeResult(typed: text, success: true, method: "cgevent")))
+            } else {
+                print("Typed \"\(text)\" (via keystroke)")
+            }
+        } catch let axError {
+            Output.printError(code: "SIM_TYPE_FAILED",
+                            message: "Type failed: \(axError)",
+                            hint: "Ensure Simulator.app is running and focused",
+                            useJson: globals.useJson)
             throw ExitCode(2)
         }
     }

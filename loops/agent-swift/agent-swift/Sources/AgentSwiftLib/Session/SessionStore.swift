@@ -32,6 +32,8 @@ public struct SessionData: Codable {
     public var recording: RecordingSession?
     public var lastVideoPath: String?
     public var lastFramePath: String?
+    public var snapshotMethod: String?
+    public var windowID: Int?
 
     public struct RefEntry: Codable {
         public let role: String
@@ -78,7 +80,7 @@ public struct SessionData: Codable {
     }
 
     public static var empty: SessionData {
-        return SessionData(pid: nil, bundleId: nil, connectedAt: nil, refs: [:], lastSnapshotAt: nil, interactiveSnapshot: nil, simulatorUDID: nil, simulatorDeviceType: nil, mirrorMode: nil, vphoneVM: nil, vphoneSocket: nil, vphoneIP: nil, recording: nil, lastVideoPath: nil, lastFramePath: nil)
+        return SessionData(pid: nil, bundleId: nil, connectedAt: nil, refs: [:], lastSnapshotAt: nil, interactiveSnapshot: nil, simulatorUDID: nil, simulatorDeviceType: nil, mirrorMode: nil, vphoneVM: nil, vphoneSocket: nil, vphoneIP: nil, recording: nil, lastVideoPath: nil, lastFramePath: nil, snapshotMethod: nil, windowID: nil)
     }
 }
 
