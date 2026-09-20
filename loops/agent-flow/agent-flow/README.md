@@ -1,15 +1,29 @@
 # agent-flow
 
-Auto-explore apps, execute YAML test flows, and publish shareable HTML reports.
+**The integrity layer for AI agent work.**
 
-agent-flow is the **flow layer** — it defines, discovers, records, verifies, and reports on E2E flows. It uses [agent-flutter](https://github.com/beastoin/agent-flutter) and [agent-swift](https://github.com/beastoin/agent-swift) as **transport layers** for device interaction.
+Most test tools are built for humans writing test scripts. agent-flow is built for AI agents running flows autonomously — with machine-synthesized integrity evidence that other agents or humans can verify. The report isn't a test result. It's a chain of evidence.
+
+## Why
+
+AI agents need to prove their work happened correctly. Screenshots alone are weak evidence — they can be fabricated, taken out of order, or miss what happened between frames. agent-flow solves this by requiring agents to stream timestamped events as they work. The tool machine-synthesizes those events — app logs, backend logs, video, screenshots, assertions — into a correlated timeline. No hand-crafted narratives. The timestamps are the evidence chain.
+
+## Principles
+
+1. **Machine-synthesized evidence** — agents provide timestamped raw artifacts, agent-flow synthesizes them into a correlated timeline by machine. No fabrication possible when the machine does the synthesis.
+2. **Multi-signal verification** — not just screenshots. App logs, backend logs, video recordings, assertions, agent reviews — all correlated by timestamp into one report.
+3. **Agent-friendly, zero friction** — schema discovery, structured JSON, deterministic output, clear error codes with hints. An agent reads the schema, follows the pipeline, gets a published report. No guessing, no manual config.
+4. **Dual-readable** — HTML reports for humans, JSON for machines. An agent can verify a flow programmatically.
+5. **Reproducible** — flows are YAML contracts. Snapshots enable fast replay. The best way to verify a report is to rerun it.
+6. **Transport-agnostic** — agent-flow never touches devices directly. It uses agent-flutter (mobile) and agent-swift (desktop/iOS VM) as transport layers.
 
 ```
-agent-flow (flows + reporting)
+agent-flow    — flows + evidence synthesis + integrity
     │
-agent-flutter / agent-swift (device control)
+agent-flutter — mobile device control (Android/iOS)
+agent-swift   — desktop + iOS VM control (macOS/vphone)
     │
-Android / iOS / macOS devices
+Android / iOS / macOS / iOS VM
 ```
 
 **Live reports:** [agent-flow.beastoin.workers.dev](https://agent-flow.beastoin.workers.dev)
