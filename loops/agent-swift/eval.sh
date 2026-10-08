@@ -40,7 +40,7 @@ core_commands = {"doctor", "connect", "disconnect", "status", "snapshot", "press
 full_commands = {
     "doctor", "connect", "disconnect", "status", "snapshot", "press", "fill",
     "get", "find", "wait", "is", "scroll", "screenshot", "schema", "click",
-    "type", "swipe", "record"
+    "type", "swipe", "record", "menubar", "collect-artifacts"
 }
 
 if mode == "json":
@@ -148,6 +148,30 @@ if [ -f "loops/agent-swift/program-phase13.md" ]; then
 fi
 if [ -f "loops/agent-swift/program-phase14.md" ]; then
   PHASE=15  # Token-efficient video analysis: keyframes, OCR, grayscale, JPEG
+fi
+if [ -f "loops/agent-swift/program-phase16.md" ]; then
+  PHASE=16  # Recording-safe screenshot
+fi
+if [ -f "loops/agent-swift/program-phase17.md" ]; then
+  PHASE=17  # Recording pipeline edge cases
+fi
+if [ -f "loops/agent-swift/program-phase18.md" ]; then
+  PHASE=18  # Sim recording quality + click coordinates
+fi
+if [ -f "loops/agent-swift/program-phase19.md" ]; then
+  PHASE=19  # vphone iOS VM support
+fi
+if [ -f "loops/agent-swift/program-phase20.md" ]; then
+  PHASE=20  # iOS 26 Simulator AX Fallback
+fi
+if [ -f "loops/agent-swift/program-phase21.md" ]; then
+  PHASE=21  # Background Input via SkyLight
+fi
+if [ -f "loops/agent-swift/program-phase22.md" ]; then
+  PHASE=22  # MenuBarExtra automation, QA diagnostics, snapshot filtering
+fi
+if [ -f "loops/agent-swift/program-phase23.md" ]; then
+  PHASE=23  # Fix Simulator connect hang and type bug
 fi
 echo "phase:            $PHASE"
 
@@ -280,6 +304,14 @@ if [ "$CLI_STATUS" = "pass" ]; then
       HELP_PASS=$((HELP_PASS + 1))
     fi
   fi
+  if [ "$PHASE" -ge 22 ]; then
+    for CMD in menubar collect-artifacts; do
+      HELP_TOTAL=$((HELP_TOTAL + 1))
+      if command_exists_in_help "$CMD"; then
+        HELP_PASS=$((HELP_PASS + 1))
+      fi
+    done
+  fi
   if [ "$HELP_PASS" -eq "$HELP_TOTAL" ]; then
     HELP_STATUS="pass"
     C_PASS=$((C_PASS + 1))
@@ -332,6 +364,14 @@ if [ "$CLI_STATUS" = "pass" ]; then
     if "$BINARY_PATH" record --help > /dev/null 2>&1; then
       PCH_PASS=$((PCH_PASS + 1))
     fi
+  fi
+  if [ "$PHASE" -ge 22 ]; then
+    for CMD in menubar collect-artifacts; do
+      PCH_TOTAL=$((PCH_TOTAL + 1))
+      if "$BINARY_PATH" "$CMD" --help > /dev/null 2>&1; then
+        PCH_PASS=$((PCH_PASS + 1))
+      fi
+    done
   fi
   C_TOTAL=$((C_TOTAL + 1))
   if [ "$PCH_PASS" -eq "$PCH_TOTAL" ]; then
@@ -434,6 +474,24 @@ if [ "$CLI_STATUS" = "pass" ]; then
     J_TOTAL=$((J_TOTAL + 1))
     "$BINARY_PATH" record stop --json > /tmp/as-eval-record-stop.json 2>&1 || true
     if json_check /tmp/as-eval-record-stop.json json; then
+      J_PASS=$((J_PASS + 1))
+    fi
+  fi
+
+  if [ "$PHASE" -ge 22 ]; then
+    # menubar list --json returns valid JSON
+    J_TOTAL=$((J_TOTAL + 1))
+    "$BINARY_PATH" menubar list --json > /tmp/as-eval-menubar.json 2>&1 || true
+    if json_check /tmp/as-eval-menubar.json json; then
+      J_PASS=$((J_PASS + 1))
+    fi
+
+    # collect-artifacts --json returns valid JSON (error expected — no connection)
+    J_TOTAL=$((J_TOTAL + 1))
+    CLEAN_HOME=$(mktemp -d)
+    AGENT_SWIFT_HOME="$CLEAN_HOME" "$BINARY_PATH" collect-artifacts --json > /tmp/as-eval-collect22.json 2>&1 || true
+    rm -rf "$CLEAN_HOME"
+    if json_check /tmp/as-eval-collect22.json json; then
       J_PASS=$((J_PASS + 1))
     fi
   fi
@@ -1707,6 +1765,193 @@ if [ "$PHASE" -ge 15 ] && [ "$BUILD_STATUS" = "pass" ]; then
 fi
 echo "p15_token_opt:    $P15_TOKEN_OPT"
 
+# Phase 22 gates: MenuBarExtra automation, QA diagnostics, snapshot filtering, collect-artifacts
+P22_MENUBAR_QA="skip"
+if [ "$PHASE" -ge 22 ] && [ "$BUILD_STATUS" = "pass" ]; then
+  P22_PASS=0
+  P22_TOTAL=0
+
+  # Gate 1: menubar command exists in help
+  P22_TOTAL=$((P22_TOTAL + 1))
+  if command_exists_in_help "menubar"; then
+    P22_PASS=$((P22_PASS + 1))
+  fi
+
+  # Gate 2: collect-artifacts command exists in help
+  P22_TOTAL=$((P22_TOTAL + 1))
+  if command_exists_in_help "collect-artifacts"; then
+    P22_PASS=$((P22_PASS + 1))
+  fi
+
+  # Gate 3: menubar list --json returns valid JSON
+  P22_TOTAL=$((P22_TOTAL + 1))
+  "$BINARY_PATH" menubar list --json > /tmp/as-eval-menubar-list.json 2>&1 || true
+  if json_check /tmp/as-eval-menubar-list.json json; then
+    P22_PASS=$((P22_PASS + 1))
+  fi
+
+  # Gate 4: menubar open --help exists
+  P22_TOTAL=$((P22_TOTAL + 1))
+  if "$BINARY_PATH" menubar open --help > /dev/null 2>&1; then
+    P22_PASS=$((P22_PASS + 1))
+  fi
+
+  # Gate 5: doctor --help mentions target-app
+  P22_TOTAL=$((P22_TOTAL + 1))
+  "$BINARY_PATH" doctor --help > /tmp/as-eval-doctor-help22.txt 2>&1 || true
+  if grep -q "target-app" /tmp/as-eval-doctor-help22.txt 2>/dev/null; then
+    P22_PASS=$((P22_PASS + 1))
+  fi
+
+  # Gate 6: snapshot --help mentions visible-only
+  P22_TOTAL=$((P22_TOTAL + 1))
+  "$BINARY_PATH" snapshot --help > /tmp/as-eval-snapshot-help22.txt 2>&1 || true
+  if grep -q "visible-only" /tmp/as-eval-snapshot-help22.txt 2>/dev/null; then
+    P22_PASS=$((P22_PASS + 1))
+  fi
+
+  # Gate 7: snapshot --help mentions nonzero-bounds
+  P22_TOTAL=$((P22_TOTAL + 1))
+  if grep -q "nonzero-bounds" /tmp/as-eval-snapshot-help22.txt 2>/dev/null; then
+    P22_PASS=$((P22_PASS + 1))
+  fi
+
+  # Gate 8: snapshot --help mentions --role filter
+  P22_TOTAL=$((P22_TOTAL + 1))
+  if grep -q "\-\-role" /tmp/as-eval-snapshot-help22.txt 2>/dev/null; then
+    P22_PASS=$((P22_PASS + 1))
+  fi
+
+  # Gate 9: snapshot --help mentions window-only
+  P22_TOTAL=$((P22_TOTAL + 1))
+  if grep -q "window-only" /tmp/as-eval-snapshot-help22.txt 2>/dev/null; then
+    P22_PASS=$((P22_PASS + 1))
+  fi
+
+  # Gate 10: collect-artifacts --json returns valid JSON (error expected — no connection)
+  P22_TOTAL=$((P22_TOTAL + 1))
+  CLEAN_HOME=$(mktemp -d)
+  AGENT_SWIFT_HOME="$CLEAN_HOME" "$BINARY_PATH" collect-artifacts --json > /tmp/as-eval-collect.json 2>&1 || true
+  rm -rf "$CLEAN_HOME"
+  if json_check /tmp/as-eval-collect.json json; then
+    P22_PASS=$((P22_PASS + 1))
+  fi
+
+  # Gate 11: schema lists menubar and collect-artifacts commands
+  P22_TOTAL=$((P22_TOTAL + 1))
+  "$BINARY_PATH" schema > /tmp/as-eval-schema22.json 2>&1 || true
+  if python3 -c "
+import json
+d=json.load(open('/tmp/as-eval-schema22.json'))
+names={c.get('name') for c in d if isinstance(c,dict)}
+assert 'menubar' in names and 'collect-artifacts' in names
+" 2>/dev/null; then
+    P22_PASS=$((P22_PASS + 1))
+  fi
+
+  # Gate 12: MenuBarTests.swift exists with >= 15 assertions
+  P22_TOTAL=$((P22_TOTAL + 1))
+  MB_ASSERTS=0
+  if [ -f "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/MenuBarTests.swift" ]; then
+    MB_ASSERTS=$(grep -c "XCTAssert" "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/MenuBarTests.swift" 2>/dev/null || echo 0)
+  fi
+  if [ "$MB_ASSERTS" -ge 15 ]; then
+    P22_PASS=$((P22_PASS + 1))
+  fi
+
+  # Gate 13: QADiagnosticsTests.swift exists with >= 15 assertions
+  P22_TOTAL=$((P22_TOTAL + 1))
+  QA_ASSERTS=0
+  if [ -f "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/QADiagnosticsTests.swift" ]; then
+    QA_ASSERTS=$(grep -c "XCTAssert" "$AGENT_SWIFT_DIR/Tests/agent-swiftTests/QADiagnosticsTests.swift" 2>/dev/null || echo 0)
+  fi
+  if [ "$QA_ASSERTS" -ge 15 ]; then
+    P22_PASS=$((P22_PASS + 1))
+  fi
+
+  # Gate 14: version is 0.12.x or higher
+  P22_TOTAL=$((P22_TOTAL + 1))
+  if "$BINARY_PATH" --version 2>&1 | grep -qE "^0\.(1[2-9]|[2-9][0-9]+)\.[0-9]+|^[1-9]+\.[0-9]+\.[0-9]+"; then
+    P22_PASS=$((P22_PASS + 1))
+  fi
+
+  # Gate 15: total tests >= 310
+  P22_TOTAL=$((P22_TOTAL + 1))
+  if [ "$TEST_COUNT" -ge 310 ]; then
+    P22_PASS=$((P22_PASS + 1))
+  fi
+
+  if [ "$P22_PASS" -eq "$P22_TOTAL" ]; then
+    P22_MENUBAR_QA="pass"
+  else
+    P22_MENUBAR_QA="fail ($P22_PASS/$P22_TOTAL)"
+  fi
+fi
+echo "p22_menubar_qa:   $P22_MENUBAR_QA"
+
+# Phase 23 gates: Fix Simulator connect hang and type bug
+P23_SIM_FIX="skip"
+if [ "$PHASE" -ge 23 ] && [ "$BUILD_STATUS" = "pass" ]; then
+  P23_PASS=0
+  P23_TOTAL=0
+
+  # Gate 1: runSimctlWithTimeout exists in SimulatorBridge.swift
+  P23_TOTAL=$((P23_TOTAL + 1))
+  if grep -q "runSimctlWithTimeout" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/SimulatorBridge.swift" 2>/dev/null; then
+    P23_PASS=$((P23_PASS + 1))
+  fi
+
+  # Gate 2: enableAccessibility uses timeout variant
+  P23_TOTAL=$((P23_TOTAL + 1))
+  if grep -q "runSimctlWithTimeout" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/IdbBridge.swift" 2>/dev/null; then
+    P23_PASS=$((P23_PASS + 1))
+  fi
+
+  # Gate 3: typeViaPasteboard exists in SimulatorBridge.swift
+  P23_TOTAL=$((P23_TOTAL + 1))
+  if grep -q "typeViaPasteboard" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/SimulatorBridge.swift" 2>/dev/null; then
+    P23_PASS=$((P23_PASS + 1))
+  fi
+
+  # Gate 4: simctl pbcopy used in pasteboard method
+  P23_TOTAL=$((P23_TOTAL + 1))
+  if grep -q "pbcopy" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/SimulatorBridge.swift" 2>/dev/null; then
+    P23_PASS=$((P23_PASS + 1))
+  fi
+
+  # Gate 5: desktop Simulator detection in type command (bundleId check)
+  P23_TOTAL=$((P23_TOTAL + 1))
+  if grep -q 'com.apple.iphonesimulator' "$AGENT_SWIFT_DIR/Sources/agent-swift/main.swift" 2>/dev/null && \
+     grep -q 'typeViaPasteboard\|pasteboard' "$AGENT_SWIFT_DIR/Sources/agent-swift/main.swift" 2>/dev/null; then
+    P23_PASS=$((P23_PASS + 1))
+  fi
+
+  # Gate 6: version is 0.13.x or higher
+  P23_TOTAL=$((P23_TOTAL + 1))
+  if "$BINARY_PATH" --version 2>&1 | grep -qE "^0\.(1[3-9]|[2-9][0-9]+)\.[0-9]+|^[1-9]+\.[0-9]+\.[0-9]+"; then
+    P23_PASS=$((P23_PASS + 1))
+  fi
+
+  # Gate 7: total tests >= 320
+  P23_TOTAL=$((P23_TOTAL + 1))
+  if [ "$TEST_COUNT" -ge 320 ]; then
+    P23_PASS=$((P23_PASS + 1))
+  fi
+
+  # Gate 8: timeout exit code 124 referenced
+  P23_TOTAL=$((P23_TOTAL + 1))
+  if grep -q "124" "$AGENT_SWIFT_DIR/Sources/AgentSwiftLib/Simulator/SimulatorBridge.swift" 2>/dev/null; then
+    P23_PASS=$((P23_PASS + 1))
+  fi
+
+  if [ "$P23_PASS" -eq "$P23_TOTAL" ]; then
+    P23_SIM_FIX="pass"
+  else
+    P23_SIM_FIX="fail ($P23_PASS/$P23_TOTAL)"
+  fi
+fi
+echo "p23_sim_fix:      $P23_SIM_FIX"
+
 # Step 5: E2E test (optional; enabled when e2e-test.sh exists)
 E2E_STATUS="skip"
 if [ -x "loops/agent-swift/e2e-test.sh" ]; then
@@ -1921,6 +2166,71 @@ if [ "$BUILD_STATUS" = "pass" ] && [ "$TEST_STATUS" = "pass" ] && [ "$CONTRACT_S
          [ "$P13_RECORDING" = "pass" ] && \
          [ "$P14_FRAME_PROC" = "pass" ] && \
          [ "$P15_TOKEN_OPT" = "pass" ]; then
+        PHASE_COMPLETE="yes"
+      fi
+      ;;
+    16|17|18|19|20|21)
+      # Phases 16-21 shipped without eval gates (v0.11.0-v0.11.1)
+      # They pass if all prior gates pass
+      if [ "$HELP_STATUS" = "pass" ] && \
+         [ "$JSON_STATUS" = "pass" ] && \
+         [ "$EXIT_STATUS" = "pass" ] && \
+         [ "$P3_INTERACTION" = "pass" ] && \
+         [ "$P4_AUTONOMY" = "pass" ] && \
+         [ "$P5_POLISH" = "pass" ] && \
+         [ "$P2B_WIDGET" = "pass" ] && \
+         [ "$P7_CLICK" = "pass" ] && \
+         [ "$P8_SIMULATOR" = "pass" ] && \
+         [ "$P9_IDB" = "pass" ] && \
+         [ "$P10_MIRROR" = "pass" ] && \
+         [ "$P11_CGEVENT_SIM" = "pass" ] && \
+         [ "$P12_USER_UX" = "pass" ] && \
+         [ "$P13_RECORDING" = "pass" ] && \
+         [ "$P14_FRAME_PROC" = "pass" ] && \
+         [ "$P15_TOKEN_OPT" = "pass" ]; then
+        PHASE_COMPLETE="yes"
+      fi
+      ;;
+    22)
+      if [ "$HELP_STATUS" = "pass" ] && \
+         [ "$JSON_STATUS" = "pass" ] && \
+         [ "$EXIT_STATUS" = "pass" ] && \
+         [ "$P3_INTERACTION" = "pass" ] && \
+         [ "$P4_AUTONOMY" = "pass" ] && \
+         [ "$P5_POLISH" = "pass" ] && \
+         [ "$P2B_WIDGET" = "pass" ] && \
+         [ "$P7_CLICK" = "pass" ] && \
+         [ "$P8_SIMULATOR" = "pass" ] && \
+         [ "$P9_IDB" = "pass" ] && \
+         [ "$P10_MIRROR" = "pass" ] && \
+         [ "$P11_CGEVENT_SIM" = "pass" ] && \
+         [ "$P12_USER_UX" = "pass" ] && \
+         [ "$P13_RECORDING" = "pass" ] && \
+         [ "$P14_FRAME_PROC" = "pass" ] && \
+         [ "$P15_TOKEN_OPT" = "pass" ] && \
+         [ "$P22_MENUBAR_QA" = "pass" ]; then
+        PHASE_COMPLETE="yes"
+      fi
+      ;;
+    23)
+      if [ "$HELP_STATUS" = "pass" ] && \
+         [ "$JSON_STATUS" = "pass" ] && \
+         [ "$EXIT_STATUS" = "pass" ] && \
+         [ "$P3_INTERACTION" = "pass" ] && \
+         [ "$P4_AUTONOMY" = "pass" ] && \
+         [ "$P5_POLISH" = "pass" ] && \
+         [ "$P2B_WIDGET" = "pass" ] && \
+         [ "$P7_CLICK" = "pass" ] && \
+         [ "$P8_SIMULATOR" = "pass" ] && \
+         [ "$P9_IDB" = "pass" ] && \
+         [ "$P10_MIRROR" = "pass" ] && \
+         [ "$P11_CGEVENT_SIM" = "pass" ] && \
+         [ "$P12_USER_UX" = "pass" ] && \
+         [ "$P13_RECORDING" = "pass" ] && \
+         [ "$P14_FRAME_PROC" = "pass" ] && \
+         [ "$P15_TOKEN_OPT" = "pass" ] && \
+         [ "$P22_MENUBAR_QA" = "pass" ] && \
+         [ "$P23_SIM_FIX" = "pass" ]; then
         PHASE_COMPLETE="yes"
       fi
       ;;
